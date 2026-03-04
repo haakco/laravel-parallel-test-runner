@@ -1,0 +1,86 @@
+{
+    "name": "haakco/laravel-parallel-test-runner",
+    "description": "Section-based parallel test runner for Laravel with weighted scheduling, CI split groups, and schema dump provisioning",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "testing",
+        "parallel",
+        "phpunit",
+        "test-runner",
+        "ci",
+        "sections"
+    ],
+    "homepage": "https://github.com/haakco/laravel-parallel-test-runner",
+    "authors": [{"name": "HaakCo", "email": "info@haak.co"}],
+    "support": {
+        "issues": "https://github.com/haakco/laravel-parallel-test-runner/issues",
+        "source": "https://github.com/haakco/laravel-parallel-test-runner"
+    },
+    "require": {
+        "php": "^8.4",
+        "illuminate/console": "^11.0 || ^12.0",
+        "illuminate/support": "^11.0 || ^12.0",
+        "illuminate/database": "^11.0 || ^12.0",
+        "symfony/process": "^7.0",
+        "spatie/laravel-data": "^4.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0 || ^10.0",
+        "phpunit/phpunit": "^11.0 || ^12.0",
+        "larastan/larastan": "*",
+        "rector/rector": "*",
+        "laravel/pint": "^1.0",
+        "mockery/mockery": "^1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Haakco\\ParallelTestRunner\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Haakco\\ParallelTestRunner\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Haakco\\ParallelTestRunner\\ParallelTestRunnerServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "test:unit": "vendor/bin/phpunit --testsuite Unit",
+        "test:feature": "vendor/bin/phpunit --testsuite Feature",
+        "test:coverage": "php -d xdebug.mode=coverage vendor/bin/phpunit --coverage-text --coverage-clover=coverage.xml",
+        "format": "vendor/bin/pint --ansi --parallel --cache-file=.pint.cache --repair",
+        "format:check": "vendor/bin/pint --ansi --test",
+        "rector": "vendor/bin/rector process --no-diffs",
+        "rector:check": "vendor/bin/rector process --no-diffs --dry-run",
+        "analyse": "vendor/bin/phpstan analyse --memory-limit=2G",
+        "lint": [
+            "@format",
+            "@rector",
+            "@analyse"
+        ],
+        "lint:ci": [
+            "@format:check",
+            "@rector:check",
+            "@analyse"
+        ],
+        "check-coupling": "grep -r 'use App\\\\' src/ && echo 'ERROR: App\\ coupling found in src/' && exit 1 || echo 'OK: No App\\ coupling'",
+        "check-all": [
+            "@check-coupling",
+            "@lint:ci",
+            "@test"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    }
+}

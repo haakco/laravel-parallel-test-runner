@@ -1,0 +1,18 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - src/
+    tmpDir: .phpstan.cache
+    reportUnmatchedIgnoredErrors: true
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        -
+            message: "#Called 'env' outside of the config directory#"
+            path: src/Reporting/JsonRunReportWriter.php
+            count: 1
+        -
+            identifier: trait.unused
+            path: src/Testing/UsesParallelRunner.php

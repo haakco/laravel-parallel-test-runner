@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haakco.dev/schemas/parallel-test-runner/run-report/v1.json",
+  "title": "Parallel Test Runner Run Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "runner_version",
+    "run_id",
+    "started_at",
+    "finished_at",
+    "duration_seconds",
+    "command",
+    "command_args",
+    "options",
+    "split",
+    "parallel",
+    "sections",
+    "counters",
+    "workers",
+    "failures",
+    "artifacts",
+    "success"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "runner_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "minLength": 6
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "command_args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "app_env",
+        "php_version",
+        "laravel_version",
+        "os"
+      ],
+      "properties": {
+        "app_env": {
+          "type": "string"
+        },
+        "php_version": {
+          "type": "string"
+        },
+        "laravel_version": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "split": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "group"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "group": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "parallel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workers_requested",
+        "workers_started",
+        "provision_mode"
+      ],
+      "properties": {
+        "workers_requested": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "workers_started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provision_mode": {
+          "type": "string",
+          "enum": [
+            "sequential-migrate-fresh",
+            "parallel-migrate-and-seed",
+            "seed-only"
+          ]
+        }
+      }
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheduled",
+        "completed",
+        "failed",
+        "omitted"
+      ],
+      "properties": {
+        "scheduled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "omitted": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tests",
+        "assertions",
+        "errors",
+        "failures",
+        "warnings",
+        "skipped",
+        "incomplete",
+        "risky"
+      ],
+      "properties": {
+        "tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assertions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "incomplete": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "risky": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worker_id",
+          "status",
+          "exit_code",
+          "database",
+          "sections",
+          "duration_seconds",
+          "artifacts"
+        ],
+        "properties": {
+          "worker_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "timed_out",
+              "crashed",
+              "cancelled"
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "database": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "error_summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "log_directory"
+            ],
+            "properties": {
+              "log_directory": {
+                "type": "string",
+                "minLength": 1
+              },
+              "metrics_json": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "junit_xml": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stdout_tail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "section",
+          "worker_id",
+          "summary",
+          "rerun_command"
+        ],
+        "properties": {
+          "section": {
+            "type": "string",
+            "minLength": 1
+          },
+          "worker_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rerun_command": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "log_directory"
+      ],
+      "properties": {
+        "log_directory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parallel_plan_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worker_commands_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_tracking_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary_markdown": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "success": {
+      "type": "boolean"
+    }
+  }
+}
