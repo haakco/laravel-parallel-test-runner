@@ -61,4 +61,101 @@ final class TrackingLoader
 
         return array_slice($metrics, 0, $limit);
     }
+
+    /**
+     * Extract method-level metrics from JUnit XML files.
+     *
+     * @return list<array{class: string, method: string, duration: float, suite: string}>
+     */
+    public function extractMethodMetrics(string $logDirectory, int $limit = 10): array
+    {
+        $metrics = [];
+        $directory = rtrim($logDirectory, DIRECTORY_SEPARATOR);
+        if (! is_dir($directory)) {
+            return [];
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $fileInfo) {
+            if (! $fileInfo instanceof \SplFileInfo) {
+                continue;
+            }
+
+            $file = $fileInfo->getPathname();
+            if (! str_ends_with($file, '_junit.xml')) {
+                continue;
+            }
+
+            $xml = @simplexml_load_file($file);
+            if ($xml === false) {
+                continue;
+            }
+
+            $testSuite = $xml->testsuite;
+            if ($testSuite === null) {
+                continue;
+            }
+
+            foreach ($testSuite->testcase as $testCase) {
+                $class = (string) ($testCase['class'] ?? '');
+                $method = (string) ($testCase['name'] ?? '');
+                $duration = (float) ($testCase['time'] ?? 0.0);
+                if ($class === '') {
+                    continue;
+                }
+                if ($method === '') {
+                    continue;
+                }
+
+                $metrics[] = [
+                    'class' => $class,
+                    'method' => $method,
+                    'duration' => $duration,
+                    'suite' => basename($file),
+                ];
+            }
+        }
+
+        usort($metrics, static fn(array $a, array $b): int => $b['duration'] <=> $a['duration']);
+
+        return array_slice($metrics, 0, $limit);
+    }
+
+    /**
+     * Estimate the execution window covered by section start/end timestamps.
+     *
+     * @param array<string, mixed> $tracking
+     */
+    public function sectionExecutionWindowSeconds(array $tracking): float
+    {
+        $sections = $tracking['sections'] ?? [];
+        $starts = [];
+        $ends = [];
+
+        foreach ($sections as $section) {
+            if (! is_array($section)) {
+                continue;
+            }
+
+            $startedAt = $section['started_at'] ?? null;
+            $completedAt = $section['completed_at'] ?? null;
+
+            if (is_numeric($startedAt)) {
+                $starts[] = (float) $startedAt;
+            }
+
+            if (is_numeric($completedAt)) {
+                $ends[] = (float) $completedAt;
+            }
+        }
+
+        if ($starts === [] || $ends === []) {
+            return 0.0;
+        }
+
+        return max(0.0, max($ends) - min($starts));
+    }
 }

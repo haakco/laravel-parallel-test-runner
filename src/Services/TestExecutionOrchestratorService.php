@@ -40,9 +40,10 @@ class TestExecutionOrchestratorService
     {
         $start = microtime(true);
         $successful = $this->run(logDirectory: $logDirectory);
-        $duration = microtime(true) - $start;
+        $finished = microtime(true);
+        $duration = $finished - $start;
 
-        $this->emitRunReport($logDirectory, $successful);
+        $this->emitRunReport($logDirectory, $successful, $start, $finished, $duration);
 
         $summary = $successful ? 'All tests passed' : 'Some tests failed';
 
@@ -188,6 +189,7 @@ class TestExecutionOrchestratorService
 
     private function runInternal(string $logDirectory): bool
     {
+        $this->tracker->setLogDirectory($logDirectory);
         $this->config->commandStartTime = microtime(true);
 
         $sections = $this->getTestSections();
@@ -368,15 +370,30 @@ class TestExecutionOrchestratorService
         return $logDirectory . '/' . $name . '.log';
     }
 
-    private function emitRunReport(string $logDirectory, bool $successful): void
-    {
+    private function emitRunReport(
+        string $logDirectory,
+        bool $successful,
+        float $runStartedAt,
+        float $runFinishedAt,
+        float $runDurationSeconds,
+    ): void {
         try {
             $this->reportWriter->write(new ReportContext(
                 logDirectory: $logDirectory,
                 successful: $successful,
                 command: (string) config('parallel-test-runner.commands.main', 'test:run-sections'),
                 summaryFile: $logDirectory . '/00_SUMMARY.txt',
-                extraOptions: [],
+                extraOptions: [
+                    'run_started_at' => date(DATE_ATOM, (int) $runStartedAt),
+                    'run_finished_at' => date(DATE_ATOM, (int) $runFinishedAt),
+                    'run_duration_seconds' => round($runDurationSeconds, 6),
+                    'workers_requested' => $this->config->parallelProcesses,
+                    'workers_started' => $this->config->parallelProcesses,
+                    'provision_mode' => $this->config->parallelProcesses > 1 ? 'parallel' : 'sequential',
+                    'split' => $this->config->splitTotal !== null
+                        ? ['total' => $this->config->splitTotal, 'group' => $this->config->splitGroup]
+                        : null,
+                ],
             ));
         } catch (Exception $exception) {
             Log::warning('Failed to write run report', [

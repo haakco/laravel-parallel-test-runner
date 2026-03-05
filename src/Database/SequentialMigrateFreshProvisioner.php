@@ -46,15 +46,23 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
 
         $databases = [];
 
+        $noRefreshDb = (bool) ($context->extraOptions['no_refresh_db'] ?? false);
+
         for ($i = 1; $i <= $workerCount; $i++) {
             $dbName = $splitTotal !== null && $splitGroup !== null
                 ? $namingStrategy->forWorkerWithSplit($i, (int) $splitTotal, (int) $splitGroup)
                 : $namingStrategy->forWorker($i);
 
-            $this->resetDatabase($dbName, $context);
+            if ($noRefreshDb) {
+                $this->ensureDatabaseExists($dbName, $context);
+            } else {
+                $this->resetDatabase($dbName, $context);
+            }
 
             $databases[$i] = $dbName;
             $this->createdDatabases[] = $dbName;
+
+            $this->seedDatabase($dbName, $context);
         }
 
         return $databases;
@@ -84,7 +92,6 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
         $this->dropDatabase($dbName);
         $this->createDatabase($dbName);
         $this->migrateFreshDatabase($dbName, $context);
-        $this->seedDatabase($dbName, $context);
     }
 
     /**
@@ -174,6 +181,59 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
         );
 
         $this->seeder->seed($seedContext);
+    }
+
+    /**
+     * Check if a database exists on the admin connection.
+     */
+    private function databaseExists(string $dbName): bool
+    {
+        $adminConnection = (string) config('parallel-test-runner.database.admin_connection', 'pgsql');
+        $pdo = DB::connection($adminConnection)->getPdo();
+        $statement = $pdo->prepare('SELECT 1 FROM pg_database WHERE datname = :dbname');
+        $statement->execute(['dbname' => $dbName]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * Ensure a database exists. If it does, apply pending migrations; if not, create and migrate:fresh.
+     */
+    private function ensureDatabaseExists(string $dbName, ProvisionContext $context): void
+    {
+        if ($this->databaseExists($dbName)) {
+            $this->ensureMigrationsUpToDate($dbName, $context);
+        } else {
+            $this->createDatabase($dbName);
+            $this->migrateFreshDatabase($dbName, $context);
+        }
+    }
+
+    /**
+     * Apply only pending migrations to an existing database (no drop/recreate).
+     */
+    private function ensureMigrationsUpToDate(string $dbName, ProvisionContext $context): void
+    {
+        $originalDb = config("database.connections.{$context->connection}.database");
+        $originalDefault = config('database.default');
+
+        try {
+            config(["database.connections.{$context->connection}.database" => $dbName]);
+            config(['database.default' => $context->connection]);
+
+            DB::purge($context->connection);
+            DB::reconnect($context->connection);
+
+            Artisan::call('migrate', [
+                '--database' => $context->connection,
+                '--force' => true,
+                '--step' => true,
+            ]);
+        } finally {
+            DB::purge($context->connection);
+            config(["database.connections.{$context->connection}.database" => $originalDb]);
+            config(['database.default' => $originalDefault]);
+        }
     }
 
     private function buildNamingStrategy(ProvisionContext $context): DatabaseNamingStrategy

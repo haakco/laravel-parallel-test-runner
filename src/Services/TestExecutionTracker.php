@@ -13,14 +13,25 @@ final class TestExecutionTracker
     /** @var array<string, mixed> */
     private array $executionData = [];
 
-    private readonly string $trackingFile;
+    private string $trackingFile;
 
     private readonly float $startTime;
 
     public function __construct(string $logDirectory)
     {
-        $this->trackingFile = rtrim($logDirectory, DIRECTORY_SEPARATOR) . '/execution_tracking.json';
+        $this->trackingFile = $this->buildTrackingFile($logDirectory);
         $this->startTime = microtime(true);
+        $this->load();
+    }
+
+    public function setLogDirectory(string $logDirectory): void
+    {
+        $trackingFile = $this->buildTrackingFile($logDirectory);
+        if ($trackingFile === $this->trackingFile) {
+            return;
+        }
+
+        $this->trackingFile = $trackingFile;
         $this->load();
     }
 
@@ -122,6 +133,11 @@ final class TestExecutionTracker
     public function getTrackingFile(): string
     {
         return $this->trackingFile;
+    }
+
+    private function buildTrackingFile(string $logDirectory): string
+    {
+        return rtrim($logDirectory, DIRECTORY_SEPARATOR) . '/execution_tracking.json';
     }
 
     private function updateTotalsFromResult(SectionResultData $result): void

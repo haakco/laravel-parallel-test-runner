@@ -68,6 +68,7 @@ final class JsonRunReportWriterTest extends TestCase
             'sections',
             'counters',
             'workers',
+            'performance',
             'failures',
             'artifacts',
             'success',
@@ -177,6 +178,25 @@ final class JsonRunReportWriterTest extends TestCase
         $this->assertArrayHasKey('log_directory', $report['workers'][0]['artifacts']);
     }
 
+    public function test_performance_block_includes_overhead_and_slow_lists(): void
+    {
+        $this->writeTrackingFile($this->successTrackingData());
+        $this->writeJunitFile();
+
+        $writer = $this->makeWriter();
+        $writer->write($this->makeContext(successful: true));
+
+        $report = $this->readReport();
+
+        $this->assertArrayHasKey('performance', $report);
+        $this->assertArrayHasKey('startup_overhead_seconds', $report['performance']);
+        $this->assertArrayHasKey('top_sections', $report['performance']);
+        $this->assertArrayHasKey('top_test_methods', $report['performance']);
+        $this->assertNotEmpty($report['performance']['top_sections']);
+        $this->assertNotEmpty($report['performance']['top_test_methods']);
+        $this->assertSame('Tests\\Unit\\ExampleTest', $report['performance']['top_test_methods'][0]['class']);
+    }
+
     public function test_schema_version_is_v1(): void
     {
         $this->writeTrackingFile($this->successTrackingData());
@@ -236,6 +256,24 @@ final class JsonRunReportWriterTest extends TestCase
         file_put_contents(
             $this->logDirectory . '/execution_tracking.json',
             json_encode($data, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR),
+        );
+    }
+
+    private function writeJunitFile(): void
+    {
+        $workerDir = $this->logDirectory . '/worker01';
+        mkdir($workerDir, 0755, true);
+
+        file_put_contents(
+            $workerDir . '/ExampleTest.php_junit.xml',
+            <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Example Suite" tests="1" assertions="1" failures="0" errors="0" time="1.25">
+    <testcase name="test_it_runs" class="Tests\Unit\ExampleTest" time="1.25"/>
+  </testsuite>
+</testsuites>
+XML
         );
     }
 

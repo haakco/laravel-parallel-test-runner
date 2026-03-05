@@ -39,6 +39,21 @@ final class TestRunnerServiceTest extends TestCase
         $this->assertStringContainsString('test-logs', $logDir);
     }
 
+    public function test_latest_symlink_uses_relative_target(): void
+    {
+        $this->createService();
+
+        $latest = base_path('test-logs/latest');
+        if (! is_link($latest)) {
+            $this->markTestSkipped('latest is not a symlink in this environment');
+        }
+
+        $target = readlink($latest);
+        $this->assertIsString($target);
+        $this->assertNotSame('', $target);
+        $this->assertFalse(str_starts_with($target, '/'));
+    }
+
     public function test_set_log_directory(): void
     {
         $service = $this->createService();

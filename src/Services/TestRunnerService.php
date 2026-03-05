@@ -143,7 +143,9 @@ class TestRunnerService
         }
 
         if (File::exists(dirname($latest))) {
-            @symlink($dir, $latest);
+            // Use a relative symlink so host/container base-path differences
+            // do not break `test-logs/latest`.
+            @symlink(basename($dir), $latest);
         }
 
         return $dir;

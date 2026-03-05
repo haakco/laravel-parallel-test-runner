@@ -59,11 +59,22 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
      */
     private function buildReport(ReportContext $context, ?array $tracking): array
     {
-        $startedAt = $tracking['started_at'] ?? now()->toIso8601String();
-        $finishedAt = $tracking['updated_at'] ?? now()->toIso8601String();
-        $duration = (float) ($tracking['duration'] ?? 0.0);
+        $wallStartedAt = $this->resolveTimestamp(
+            $context->extraOptions['run_started_at'] ?? null,
+            $tracking['started_at'] ?? null,
+        );
+        $wallFinishedAt = $this->resolveTimestamp(
+            $context->extraOptions['run_finished_at'] ?? null,
+            $tracking['updated_at'] ?? null,
+        );
+        $sectionDuration = (float) ($tracking['duration'] ?? 0.0);
+        $wallDuration = $this->resolveWallDuration($context, $wallStartedAt, $wallFinishedAt, $sectionDuration);
+        $startupOverhead = max(0.0, $wallDuration - $sectionDuration);
         $totals = $tracking['totals'] ?? [];
         $sections = $tracking['sections'] ?? [];
+        $topSections = $tracking === null ? [] : $this->trackingLoader->extractSectionMetrics($tracking, 20);
+        $topMethods = $this->trackingLoader->extractMethodMetrics($context->logDirectory, 20);
+        $sectionExecutionWindow = $tracking === null ? 0.0 : $this->trackingLoader->sectionExecutionWindowSeconds($tracking);
 
         $scheduledCount = count($sections);
         $completedCount = 0;
@@ -90,9 +101,9 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
             'schema_version' => self::SCHEMA_VERSION,
             'runner_version' => self::RUNNER_VERSION,
             'run_id' => $runId,
-            'started_at' => $startedAt,
-            'finished_at' => $finishedAt,
-            'duration_seconds' => $duration,
+            'started_at' => $wallStartedAt,
+            'finished_at' => $wallFinishedAt,
+            'duration_seconds' => $wallDuration,
             'command' => $context->command,
             'command_args' => $this->extractCommandArgs($context),
             'options' => $context->extraOptions,
@@ -119,12 +130,66 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
                 'risky' => (int) ($totals['risky'] ?? 0),
             ],
             'workers' => $this->buildWorkers($context),
+            'performance' => [
+                'section_duration_seconds' => $sectionDuration,
+                'wall_duration_seconds' => $wallDuration,
+                'section_execution_window_seconds' => $sectionExecutionWindow,
+                'startup_overhead_seconds' => $startupOverhead,
+                'startup_overhead_ratio' => $wallDuration > 0.0 ? round($startupOverhead / $wallDuration, 4) : 0.0,
+                'top_sections' => $topSections,
+                'top_test_methods' => $topMethods,
+            ],
             'failures' => $failures,
             'artifacts' => [
                 'log_directory' => $this->formatter->relativePath($context->logDirectory),
             ],
             'success' => $success,
         ];
+    }
+
+    private function resolveTimestamp(mixed $preferred, mixed $fallback): string
+    {
+        if (is_string($preferred) && $preferred !== '') {
+            return $preferred;
+        }
+
+        if (is_numeric($preferred)) {
+            return date(DATE_ATOM, (int) ((float) $preferred));
+        }
+
+        if (is_string($fallback) && $fallback !== '') {
+            return $fallback;
+        }
+
+        if (is_numeric($fallback)) {
+            return date(DATE_ATOM, (int) ((float) $fallback));
+        }
+
+        return now()->toIso8601String();
+    }
+
+    private function resolveWallDuration(
+        ReportContext $context,
+        string $wallStartedAt,
+        string $wallFinishedAt,
+        float $sectionDuration,
+    ): float {
+        $explicit = $context->extraOptions['run_duration_seconds'] ?? null;
+        if (is_numeric($explicit)) {
+            return max(0.0, (float) $explicit);
+        }
+
+        try {
+            $started = strtotime($wallStartedAt);
+            $finished = strtotime($wallFinishedAt);
+            if ($started !== false && $finished !== false && $finished >= $started) {
+                return (float) ($finished - $started);
+            }
+        } catch (\Throwable) {
+            // Fallback below.
+        }
+
+        return max(0.0, $sectionDuration);
     }
 
     /**

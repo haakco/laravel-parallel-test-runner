@@ -110,10 +110,14 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
             if ($attempt > 0) {
                 sleep($retryDelay);
 
-                // Drop and recreate databases before retry
-                foreach ($pendingWorkers as $workerId) {
-                    $dbName = $databases[$workerId];
-                    $this->dropDatabase($dbName);
+                $noRefreshDb = (bool) ($context->extraOptions['no_refresh_db'] ?? false);
+
+                // Drop databases before retry only when not in no-refresh mode
+                if (! $noRefreshDb) {
+                    foreach ($pendingWorkers as $workerId) {
+                        $dbName = $databases[$workerId];
+                        $this->dropDatabase($dbName);
+                    }
                 }
             }
 
@@ -153,12 +157,21 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
 
     /**
      * Provision a single database: create -> schema -> migrate:fresh -> seed.
+     *
+     * When no_refresh_db is true, reuse existing databases and only apply pending migrations.
      */
     private function provisionSingleDatabase(string $dbName, ProvisionContext $context, int $workerId): void
     {
-        $this->dropDatabase($dbName);
-        $this->createDatabase($dbName);
-        $this->migrateFreshDatabase($dbName, $context);
+        $noRefreshDb = (bool) ($context->extraOptions['no_refresh_db'] ?? false);
+
+        if ($noRefreshDb) {
+            $this->ensureDatabaseExists($dbName, $context);
+        } else {
+            $this->dropDatabase($dbName);
+            $this->createDatabase($dbName);
+            $this->migrateFreshDatabase($dbName, $context);
+        }
+
         $this->seedDatabase($dbName, $context, $workerId);
     }
 
@@ -224,6 +237,59 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
         );
 
         $this->seeder->seed($seedContext);
+    }
+
+    /**
+     * Check if a database exists on the admin connection.
+     */
+    private function databaseExists(string $dbName): bool
+    {
+        $adminConnection = (string) config('parallel-test-runner.database.admin_connection', 'pgsql');
+        $pdo = DB::connection($adminConnection)->getPdo();
+        $statement = $pdo->prepare('SELECT 1 FROM pg_database WHERE datname = :dbname');
+        $statement->execute(['dbname' => $dbName]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * Ensure a database exists. If it does, apply pending migrations; if not, create and migrate:fresh.
+     */
+    private function ensureDatabaseExists(string $dbName, ProvisionContext $context): void
+    {
+        if ($this->databaseExists($dbName)) {
+            $this->ensureMigrationsUpToDate($dbName, $context);
+        } else {
+            $this->createDatabase($dbName);
+            $this->migrateFreshDatabase($dbName, $context);
+        }
+    }
+
+    /**
+     * Apply only pending migrations to an existing database (no drop/recreate).
+     */
+    private function ensureMigrationsUpToDate(string $dbName, ProvisionContext $context): void
+    {
+        $originalDb = config("database.connections.{$context->connection}.database");
+        $originalDefault = config('database.default');
+
+        try {
+            config(["database.connections.{$context->connection}.database" => $dbName]);
+            config(['database.default' => $context->connection]);
+
+            DB::purge($context->connection);
+            DB::reconnect($context->connection);
+
+            Artisan::call('migrate', [
+                '--database' => $context->connection,
+                '--force' => true,
+                '--step' => true,
+            ]);
+        } finally {
+            DB::purge($context->connection);
+            config(["database.connections.{$context->connection}.database" => $originalDb]);
+            config(['database.default' => $originalDefault]);
+        }
     }
 
     private function buildNamingStrategy(ProvisionContext $context): DatabaseNamingStrategy
