@@ -266,7 +266,12 @@ class TestReportValidateCommand extends Command
             return $path;
         }
 
-        return $basePath . '/' . $path;
+        $projectPath = base_path($path);
+        if (File::exists($projectPath)) {
+            return $projectPath;
+        }
+
+        return $basePath . '/' . ltrim($path, '/');
     }
 
     private function displaySummary(object $data): void

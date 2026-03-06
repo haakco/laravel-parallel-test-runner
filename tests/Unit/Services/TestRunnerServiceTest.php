@@ -235,6 +235,7 @@ final class TestRunnerServiceTest extends TestCase
             maxFilesPerRun: 10,
             failFast: false,
             individual: false,
+            ignoreLock: false,
             parallelProcesses: 1,
             runAll: false,
             keepParallelDatabases: false,

@@ -197,10 +197,17 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
      */
     private function extractCommandArgs(ReportContext $context): array
     {
-        $parts = explode(' ', $context->command);
+        $parts = preg_split('/\s+/', trim($context->command)) ?: [];
 
-        // Return everything after the command name
-        return array_slice($parts, 3);
+        if ($parts === []) {
+            return [];
+        }
+
+        if ($parts[0] === 'php' && ($parts[1] ?? null) === 'artisan') {
+            return array_slice($parts, 3);
+        }
+
+        return array_slice($parts, 1);
     }
 
     /**

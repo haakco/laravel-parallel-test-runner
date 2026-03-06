@@ -245,7 +245,7 @@ class TestRunnerConfigurationService
             ->setSplitTotal($options->splitTotal)
             ->setSplitGroup($options->splitGroup)
             ->setIndividual($options->individual)
-            ->setIgnoreLock(false)
+            ->setIgnoreLock($options->ignoreLock)
             ->setOptions([
                 'no_refresh_db' => $options->preventRefreshDatabase,
                 'keep_parallel_dbs' => $options->keepParallelDatabases,

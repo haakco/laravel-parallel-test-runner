@@ -139,6 +139,7 @@ final class TestRunnerConfigurationServiceTest extends TestCase
             maxFilesPerRun: 5,
             failFast: true,
             individual: true,
+            ignoreLock: true,
             parallelProcesses: 4,
             runAll: false,
             keepParallelDatabases: false,
@@ -162,6 +163,7 @@ final class TestRunnerConfigurationServiceTest extends TestCase
         $this->assertSame(5, $this->service->maxFilesPerRun);
         $this->assertTrue($this->service->failFast);
         $this->assertTrue($this->service->individual);
+        $this->assertTrue($this->service->ignoreLock);
         $this->assertSame(4, $this->service->parallelProcesses);
         $this->assertSame(3, $this->service->splitTotal);
         $this->assertSame(1, $this->service->splitGroup);

@@ -250,4 +250,30 @@ final class ConfigurableSectionResolverTest extends TestCase
 
         $this->assertSame($first, $second);
     }
+
+    public function test_filters_sections_to_explicit_test_files(): void
+    {
+        $context = new SectionResolutionContext(
+            scanPaths: [
+                $this->fixtureTestsPath . '/Unit',
+                $this->fixtureTestsPath . '/Feature',
+            ],
+            forceSplitDirectories: [],
+            individual: true,
+            sections: [],
+            tests: [$this->fixtureTestsPath . '/Unit/Models/UserModelTest.php'],
+            filter: null,
+            testSuite: null,
+            splitTotal: null,
+            splitGroup: null,
+            additionalSuites: [],
+            extraOptions: ['max_files_per_section' => 10],
+        );
+
+        $sections = $this->resolver->resolve($context);
+
+        $this->assertCount(1, $sections);
+        $this->assertSame('Unit/Models/UserModelTest.php', $sections[0]->name);
+        $this->assertSame($this->fixtureTestsPath . '/Unit/Models/UserModelTest.php', $sections[0]->path);
+    }
 }

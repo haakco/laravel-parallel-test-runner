@@ -15,6 +15,7 @@ final class TestRunSectionsCommand extends Command
 {
     protected $signature = 'test:run-sections
                             {tests?* : Specific test files or directories to run}
+                            {--test-file=* : Specific test file(s) to run (legacy alias)}
                             {--debug : Enable debug output with detailed information}
                             {--timeout=600 : Timeout per section in seconds}
                             {--max-files=10 : Maximum files per test run}

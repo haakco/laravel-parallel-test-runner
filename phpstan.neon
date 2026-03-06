@@ -16,3 +16,21 @@ parameters:
         -
             identifier: trait.unused
             path: src/Testing/UsesParallelRunner.php
+        -
+            identifier: trait.unused
+            path: src/TestingSupport/Api/AssertsApiResponses.php
+        -
+            identifier: trait.unused
+            path: src/TestingSupport/Console/InteractsWithConsoleCommands.php
+        -
+            identifier: trait.unused
+            path: src/TestingSupport/Performance/DetectsNPlusOneQueries.php
+        -
+            identifier: trait.unused
+            path: src/TestingSupport/Performance/MeasuresMemoryUsage.php
+        -
+            identifier: trait.unused
+            path: src/TestingSupport/Performance/OptimizesHashingForTests.php
+        -
+            identifier: trait.unused
+            path: src/TestingSupport/Performance/PerformanceBenchmarking.php

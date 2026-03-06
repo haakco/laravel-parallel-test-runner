@@ -59,6 +59,7 @@ final class CoreDtoTest extends TestCase
             maxFilesPerRun: 10,
             failFast: false,
             individual: false,
+            ignoreLock: false,
             parallelProcesses: 1,
             runAll: false,
             keepParallelDatabases: false,
@@ -102,5 +103,25 @@ final class CoreDtoTest extends TestCase
         $this->assertSame(1, $data->splitGroup);
         $this->assertSame(['Unit/Models'], $data->sections);
         $this->assertTrue($data->extraOptions['stripeOnly']);
+    }
+
+    public function test_run_options_from_command_input_supports_test_file_alias_and_ignore_lock(): void
+    {
+        $data = TestRunOptionsData::fromCommandInput(
+            options: [
+                'ignore-lock' => true,
+                'test-file' => ['tests/Unit/FooTest.php'],
+            ],
+            arguments: ['tests' => ['tests/Unit/BarTest.php']],
+            splitTotal: null,
+            splitGroup: null,
+            logDirectory: null,
+        );
+
+        $this->assertTrue($data->ignoreLock);
+        $this->assertSame([
+            'tests/Unit/BarTest.php',
+            'tests/Unit/FooTest.php',
+        ], $data->tests);
     }
 }

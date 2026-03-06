@@ -20,6 +20,7 @@ final class TestRunOptionsData extends Data
         public int $maxFilesPerRun,
         public bool $failFast,
         public bool $individual,
+        public bool $ignoreLock,
         public int $parallelProcesses,
         public bool $runAll,
         public bool $keepParallelDatabases,
@@ -55,7 +56,10 @@ final class TestRunOptionsData extends Data
         ));
 
         $tests = array_values(array_filter(
-            array_map(static fn(mixed $value): string => (string) $value, $arguments['tests'] ?? []),
+            array_map(static fn(mixed $value): string => (string) $value, array_merge(
+                $arguments['tests'] ?? [],
+                $options['test-file'] ?? [],
+            )),
             static fn(string $test): bool => $test !== ''
         ));
 
@@ -66,6 +70,7 @@ final class TestRunOptionsData extends Data
             maxFilesPerRun: (int) ($options['max-files'] ?? 10),
             failFast: (bool) ($options['fail-fast'] ?? false),
             individual: (bool) ($options['individual'] ?? false),
+            ignoreLock: (bool) ($options['ignore-lock'] ?? false),
             parallelProcesses: (int) ($options['parallel'] ?? 1),
             runAll: (bool) ($options['all'] ?? false),
             keepParallelDatabases: (bool) ($options['keep-parallel-dbs'] ?? false),

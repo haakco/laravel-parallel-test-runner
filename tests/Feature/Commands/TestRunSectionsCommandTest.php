@@ -11,6 +11,7 @@ use Haakco\ParallelTestRunner\Data\Results\HangingTestsResultData;
 use Haakco\ParallelTestRunner\Data\Results\SectionListResultData;
 use Haakco\ParallelTestRunner\Data\Results\TestRunnerConfigurationFeedbackData;
 use Haakco\ParallelTestRunner\Data\Results\TestRunResultData;
+use Haakco\ParallelTestRunner\Data\TestRunOptionsData;
 use Haakco\ParallelTestRunner\Data\TestSectionData;
 use Haakco\ParallelTestRunner\Services\TestRunnerService;
 use Haakco\ParallelTestRunner\Tests\TestCase;
@@ -257,6 +258,26 @@ final class TestRunSectionsCommandTest extends TestCase
 
         $this->artisan('test:run-sections')
             ->expectsOutputToContain('Tests passed')
+            ->assertSuccessful();
+    }
+
+    public function test_test_file_alias_is_forwarded_as_specific_test(): void
+    {
+        $this->testRunner
+            ->shouldReceive('configure')
+            ->once()
+            ->withArgs(fn(TestRunOptionsData $options): bool => $options->tests === ['tests/Unit/FooTest.php'])
+            ->andReturn(new TestRunnerConfigurationFeedbackData(
+                message: 'Configuration applied',
+                settings: [],
+            ));
+
+        $this->testRunner
+            ->shouldReceive('runConfigured')
+            ->once()
+            ->andReturn(TestRunResultData::success('All tests passed', 1.0, 1, 1));
+
+        $this->artisan('test:run-sections', ['--test-file' => ['tests/Unit/FooTest.php']])
             ->assertSuccessful();
     }
 

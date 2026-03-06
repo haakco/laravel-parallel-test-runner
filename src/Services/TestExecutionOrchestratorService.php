@@ -389,7 +389,9 @@ class TestExecutionOrchestratorService
                     'run_duration_seconds' => round($runDurationSeconds, 6),
                     'workers_requested' => $this->config->parallelProcesses,
                     'workers_started' => $this->config->parallelProcesses,
-                    'provision_mode' => $this->config->parallelProcesses > 1 ? 'parallel' : 'sequential',
+                    'provision_mode' => $this->config->parallelProcesses > 1
+                        ? 'parallel-migrate-and-seed'
+                        : 'sequential-migrate-fresh',
                     'split' => $this->config->splitTotal !== null
                         ? ['total' => $this->config->splitTotal, 'group' => $this->config->splitGroup]
                         : null,

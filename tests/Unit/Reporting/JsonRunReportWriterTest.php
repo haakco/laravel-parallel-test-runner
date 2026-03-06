@@ -208,6 +208,18 @@ final class JsonRunReportWriterTest extends TestCase
         $this->assertSame('v1', $report['schema_version']);
     }
 
+    public function test_command_args_strip_php_artisan_prefix(): void
+    {
+        $this->writeTrackingFile($this->successTrackingData());
+
+        $writer = $this->makeWriter();
+        $writer->write($this->makeContext(successful: true));
+
+        $report = $this->readReport();
+
+        $this->assertSame(['--parallel=2'], $report['command_args']);
+    }
+
     public function test_counters_include_all_fields(): void
     {
         $this->writeTrackingFile($this->successTrackingData());

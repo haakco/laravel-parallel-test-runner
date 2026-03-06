@@ -19,6 +19,7 @@
     "sections",
     "counters",
     "workers",
+    "performance",
     "failures",
     "artifacts",
     "success"
@@ -300,6 +301,53 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "section_duration_seconds",
+        "wall_duration_seconds",
+        "section_execution_window_seconds",
+        "startup_overhead_seconds",
+        "startup_overhead_ratio",
+        "top_sections",
+        "top_test_methods"
+      ],
+      "properties": {
+        "section_duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wall_duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "section_execution_window_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "startup_overhead_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "startup_overhead_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "top_sections": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "top_test_methods": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         }
       }

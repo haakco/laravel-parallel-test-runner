@@ -52,6 +52,10 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
             );
         }
 
+        if ($context->tests !== []) {
+            $sections = $this->filterByExplicitTests($sections, $context->tests);
+        }
+
         usort($sections, static fn(TestSectionData $a, TestSectionData $b): int => strcmp($a->name, $b->name));
 
         $this->cache[$cacheKey] = $sections;
@@ -191,6 +195,30 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
         return base_path($path);
     }
 
+    /**
+     * @param list<TestSectionData> $sections
+     * @param list<string> $tests
+     * @return list<TestSectionData>
+     */
+    private function filterByExplicitTests(array $sections, array $tests): array
+    {
+        $normalizedTests = array_map(
+            $this->resolveAbsolutePath(...),
+            $tests,
+        );
+
+        return array_values(array_filter(
+            $sections,
+            static function (TestSectionData $section) use ($normalizedTests): bool {
+                if (in_array($section->path, $normalizedTests, true)) {
+                    return true;
+                }
+
+                return array_any($section->files, fn($file): bool => in_array($file, $normalizedTests, true));
+            }
+        ));
+    }
+
     private function buildCacheKey(SectionResolutionContext $context): string
     {
         $normalizedSplitDirs = $context->forceSplitDirectories;
@@ -199,11 +227,15 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
         $normalizedScanPaths = $context->scanPaths;
         sort($normalizedScanPaths);
 
+        $normalizedTests = $context->tests;
+        sort($normalizedTests);
+
         return implode(':', [
             $context->individual ? '1' : '0',
             (string) ($context->extraOptions['max_files_per_section'] ?? config('parallel-test-runner.sections.max_files_per_section', 10)),
             md5(implode('|', $normalizedSplitDirs)),
             md5(implode('|', $normalizedScanPaths)),
+            md5(implode('|', $normalizedTests)),
         ]);
     }
 }

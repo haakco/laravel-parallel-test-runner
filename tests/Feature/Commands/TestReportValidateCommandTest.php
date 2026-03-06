@@ -149,6 +149,30 @@ final class TestReportValidateCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
+    public function test_strict_artifacts_accepts_project_relative_paths(): void
+    {
+        $relativeLogDir = 'tmp/parallel-test-runner-relative-' . uniqid();
+        $absoluteLogDir = base_path($relativeLogDir);
+        $absoluteWorkerLogDir = $absoluteLogDir . '/worker01';
+        File::ensureDirectoryExists($absoluteLogDir);
+        File::ensureDirectoryExists($absoluteWorkerLogDir);
+
+        $report = $this->createValidReport();
+        $report['artifacts']['log_directory'] = $relativeLogDir;
+        $report['workers'][0]['artifacts']['log_directory'] = $absoluteWorkerLogDir;
+
+        $reportPath = $this->tempDir . '/relative-report.json';
+        File::put($reportPath, json_encode($report, JSON_THROW_ON_ERROR));
+
+        $this->artisan('test:report:validate', [
+            '--report' => $reportPath,
+            '--strict-artifacts' => true,
+        ])
+            ->assertExitCode(0);
+
+        File::deleteDirectory($absoluteLogDir);
+    }
+
     public function test_rejects_unexpected_properties(): void
     {
         $report = $this->createValidReport();
@@ -210,6 +234,15 @@ final class TestReportValidateCommandTest extends TestCase
                         'log_directory' => '/tmp/test-logs/worker01',
                     ],
                 ],
+            ],
+            'performance' => [
+                'section_duration_seconds' => 5.0,
+                'wall_duration_seconds' => 5.5,
+                'section_execution_window_seconds' => 5.0,
+                'startup_overhead_seconds' => 0.5,
+                'startup_overhead_ratio' => 0.0909,
+                'top_sections' => [],
+                'top_test_methods' => [],
             ],
             'failures' => [],
             'artifacts' => [
