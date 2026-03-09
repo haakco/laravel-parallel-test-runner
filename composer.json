@@ -32,6 +32,7 @@
         "larastan/larastan": "*",
         "rector/rector": "*",
         "laravel/pint": "^1.0",
+        "phpmd/phpmd": "^2.15",
         "mockery/mockery": "^1.6"
     },
     "autoload": {
@@ -61,15 +62,26 @@
         "rector": "vendor/bin/rector process --no-diffs",
         "rector:check": "vendor/bin/rector process --no-diffs --dry-run",
         "analyse": "vendor/bin/phpstan analyse --memory-limit=2G",
+        "lint:complex": "vendor/bin/phpmd 'src' text phpmd.xml --exclude 'vendor/*'",
+        "lint:dup": "npx --yes jscpd@4.0.8 --min-lines 8 --min-tokens 70 --threshold 0 --format php --gitignore --reporters console --ignore '**/vendor/**' src",
         "lint": [
             "@format",
             "@rector",
             "@analyse"
         ],
+        "lint:strict": [
+            "@lint",
+            "@lint:complex",
+            "@lint:dup"
+        ],
         "lint:ci": [
             "@format:check",
             "@rector:check",
             "@analyse"
+        ],
+        "quality": [
+            "@lint:complex",
+            "@lint:dup"
         ],
         "check-coupling": "grep -r 'use App\\\\' src/ && echo 'ERROR: App\\ coupling found in src/' && exit 1 || echo 'OK: No App\\ coupling'",
         "check-all": [
