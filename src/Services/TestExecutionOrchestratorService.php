@@ -151,9 +151,9 @@ class TestExecutionOrchestratorService
             unlink($pidFile);
         }
 
-        $logDir = $options->logDirectory ?? base_path('test-logs/' . date('Ymd_His'));
-        if (! is_dir($logDir)) {
-            mkdir($logDir, 0755, true);
+        $logDir = $options->logDirectory ?? base_path('test-logs/' . sprintf('%s_%s', date('Ymd_His_u'), bin2hex(random_bytes(3))));
+        if (! is_dir($logDir) && ! @mkdir($logDir, 0755, true) && ! is_dir($logDir)) {
+            throw new \RuntimeException(sprintf('Unable to create test log directory [%s].', $logDir));
         }
 
         $mainCommand = (string) config('parallel-test-runner.commands.main', 'test:run-sections');

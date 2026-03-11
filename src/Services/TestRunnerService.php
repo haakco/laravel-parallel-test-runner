@@ -34,7 +34,7 @@ class TestRunnerService
     public function configure(TestRunOptionsData $options, OutputStyle $output): TestRunnerConfigurationFeedbackData
     {
         if ($options->logDirectory !== null && $options->logDirectory !== $this->logDirectory) {
-            File::ensureDirectoryExists($options->logDirectory);
+            $this->ensureDirectoryExists($options->logDirectory);
             $this->logDirectory = $options->logDirectory;
         }
 
@@ -117,7 +117,7 @@ class TestRunnerService
 
     public function setLogDirectory(string $logDirectory): self
     {
-        File::ensureDirectoryExists($logDirectory);
+        $this->ensureDirectoryExists($logDirectory);
         $this->logDirectory = $logDirectory;
 
         return $this;
@@ -130,17 +130,10 @@ class TestRunnerService
 
     private function createLogDirectory(): string
     {
-        $timestamp = date('Ymd_His');
-        $dir = base_path('test-logs/' . $timestamp);
-
-        File::ensureDirectoryExists($dir);
+        $dir = $this->createUniqueLogDirectory();
 
         $latest = base_path('test-logs/latest');
-        if (is_link($latest)) {
-            unlink($latest);
-        } elseif (File::exists($latest)) {
-            File::deleteDirectory($latest);
-        }
+        $this->removeExistingLatestPath($latest);
 
         if (File::exists(dirname($latest))) {
             // Use a relative symlink so host/container base-path differences
@@ -149,5 +142,55 @@ class TestRunnerService
         }
 
         return $dir;
+    }
+
+    private function removeExistingLatestPath(string $latest): void
+    {
+        if (is_link($latest)) {
+            // Another process can remove the symlink between the existence
+            // check and unlink. Ignore that specific race, but keep surfacing
+            // real filesystem failures.
+            if (! @unlink($latest) && is_link($latest)) {
+                throw new \RuntimeException(sprintf('Unable to remove symlink at [%s].', $latest));
+            }
+
+            return;
+        }
+
+        if (File::exists($latest)) {
+            File::deleteDirectory($latest);
+        }
+    }
+
+    private function createUniqueLogDirectory(): string
+    {
+        $baseDirectory = base_path('test-logs');
+        $this->ensureDirectoryExists($baseDirectory);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $directory = $baseDirectory . '/' . $this->generateLogDirectoryName();
+
+            if (@mkdir($directory, 0755, true) || is_dir($directory)) {
+                return $directory;
+            }
+        }
+
+        throw new \RuntimeException(sprintf('Unable to create test log directory under [%s].', $baseDirectory));
+    }
+
+    private function ensureDirectoryExists(string $directory): void
+    {
+        if (is_dir($directory)) {
+            return;
+        }
+
+        if (! @mkdir($directory, 0755, true) && ! is_dir($directory)) {
+            throw new \RuntimeException(sprintf('Unable to create directory [%s].', $directory));
+        }
+    }
+
+    private function generateLogDirectoryName(): string
+    {
+        return sprintf('%s_%s', date('Ymd_His_u'), bin2hex(random_bytes(3)));
     }
 }
