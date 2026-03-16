@@ -283,6 +283,22 @@ final class TestRunSectionsCommand extends Command
     {
         $this->newLine();
 
+        $countsLine = sprintf(
+            '%d tests, %d assertions',
+            $result->totalTests,
+            $result->totalAssertions,
+        );
+
+        if ($result->totalErrors > 0) {
+            $countsLine .= sprintf(', <fg=red>%d errors</>', $result->totalErrors);
+        }
+        if ($result->totalFailures > 0) {
+            $countsLine .= sprintf(', <fg=red>%d failures</>', $result->totalFailures);
+        }
+        if ($result->totalSkipped > 0) {
+            $countsLine .= sprintf(', %d skipped', $result->totalSkipped);
+        }
+
         if ($result->success) {
             $this->info('Tests passed!');
         } else {
@@ -290,10 +306,25 @@ final class TestRunSectionsCommand extends Command
         }
 
         if ($result->duration > 0) {
-            $this->line('Total time: ' . gmdate('H:i:s', (int) $result->duration));
+            $this->line('Duration: ' . gmdate('H:i:s', (int) $result->duration));
         }
 
-        $this->line($result->summary);
+        $this->line($countsLine);
+
+        if ($result->failures !== []) {
+            $this->newLine();
+            $this->line(sprintf('<fg=red>Failed sections (%d):</>', count($result->failures)));
+            foreach ($result->failures as $failure) {
+                $this->line(sprintf('  <fg=red>x</> %s (%s)', $failure['section'], $failure['summary']));
+                $this->line(sprintf('    <fg=gray>%s</>', $failure['rerun_command']));
+            }
+        }
+
+        if ($result->logDirectory !== '') {
+            $this->newLine();
+            $relativePath = str_replace(base_path() . '/', '', $result->logDirectory);
+            $this->comment('Logs: ' . $relativePath);
+        }
 
         return $result->exitCode;
     }

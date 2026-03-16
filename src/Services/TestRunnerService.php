@@ -151,6 +151,7 @@ class TestRunnerService
             // another process may delete or recreate it between these calls, so
             // cleanup must remain best-effort.
             @unlink($latest);
+
             return;
         }
 

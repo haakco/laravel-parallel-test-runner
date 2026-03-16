@@ -222,6 +222,10 @@ final class ParallelTestOrchestrator
     {
         $allSuccess = true;
         $checkInterval = 100_000; // 0.1 seconds
+        $startTime = microtime(true);
+        $lastProgressTime = 0.0;
+        $progressInterval = 2.0; // seconds between progress updates
+        $isVerbose = ! $this->output->isQuiet();
 
         while ($this->hasRunningWorkers()) {
             Sleep::usleep($checkInterval);
@@ -269,6 +273,11 @@ final class ParallelTestOrchestrator
                     }
 
                     $worker['exit_code'] = $exitCode;
+
+                    if ($isVerbose) {
+                        $statusLabel = $worker['status'] === 'completed' ? '<fg=green>done</>' : '<fg=red>' . $worker['status'] . '</>';
+                        $this->output->writeln("  Worker {$workerId} finished ({$statusLabel})");
+                    }
                 }
 
                 $latestOutput = $process->latestOutput();
@@ -276,9 +285,92 @@ final class ParallelTestOrchestrator
                     $this->processWorkerOutput($workerId, $latestOutput);
                 }
             }
+
+            if ($isVerbose) {
+                $now = microtime(true);
+                if ($now - $lastProgressTime >= $progressInterval) {
+                    $lastProgressTime = $now;
+                    $this->printProgressSummary($startTime);
+                }
+            }
+        }
+
+        if ($isVerbose && $lastProgressTime > 0.0) {
+            $this->printProgressSummary($startTime);
+            $this->output->writeln('');
         }
 
         return $allSuccess;
+    }
+
+    private function printProgressSummary(float $startTime): void
+    {
+        $elapsed = microtime(true) - $startTime;
+        $elapsedFormatted = gmdate('i:s', (int) $elapsed);
+
+        $running = 0;
+        $done = 0;
+        $failed = 0;
+        $totalSections = 0;
+        $completedSections = 0;
+
+        foreach ($this->workerProcesses as $worker) {
+            $totalSections += $worker['total_sections'];
+
+            match ($worker['status']) {
+                'running' => $running++,
+                'completed' => $done++,
+                'failed', 'crashed' => $failed++,
+                default => null,
+            };
+
+            $completedSections += $this->countCompletedSectionsFromTracking($worker);
+        }
+
+        $statusParts = [];
+        if ($running > 0) {
+            $statusParts[] = "<fg=cyan>{$running} running</>";
+        }
+        if ($done > 0) {
+            $statusParts[] = "<fg=green>{$done} done</>";
+        }
+        if ($failed > 0) {
+            $statusParts[] = "<fg=red>{$failed} failed</>";
+        }
+        $workerStatus = implode(', ', $statusParts);
+
+        $this->output->write("\r");
+        $this->output->write("  [{$elapsedFormatted}] Workers: {$workerStatus} | Sections: {$completedSections}/{$totalSections}");
+    }
+
+    /**
+     * @param array{plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string} $worker
+     */
+    private function countCompletedSectionsFromTracking(array $worker): int
+    {
+        if ($worker['status'] !== 'running') {
+            return $worker['total_sections'];
+        }
+
+        $trackingFile = $worker['plan']->logDirectory . '/execution_tracking.json';
+        if (! file_exists($trackingFile)) {
+            return $worker['completed_sections'];
+        }
+
+        try {
+            $payload = json_decode(file_get_contents($trackingFile), true, 512, JSON_THROW_ON_ERROR);
+            $sections = $payload['sections'] ?? [];
+            $completed = 0;
+            foreach ($sections as $section) {
+                if (isset($section['completed_at']) && $section['completed_at'] > 0) {
+                    $completed++;
+                }
+            }
+
+            return $completed;
+        } catch (Exception) {
+            return $worker['completed_sections'];
+        }
     }
 
     private function hasRunningWorkers(): bool
@@ -321,7 +413,7 @@ final class ParallelTestOrchestrator
 
     private function aggregateResults(): void
     {
-        $this->output->newLine(count($this->workerProcesses) + 2);
+        $this->output->newLine();
         $this->output->info('Aggregating results from all workers...');
 
         $metricsAggregate = WorkerMetricsData::createEmpty();
