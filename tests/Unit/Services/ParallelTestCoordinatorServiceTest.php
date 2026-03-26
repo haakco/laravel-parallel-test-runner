@@ -20,6 +20,7 @@ use Illuminate\Console\OutputStyle;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Console\Output\NullOutput;
 
 final class ParallelTestCoordinatorServiceTest extends TestCase
@@ -131,6 +132,167 @@ final class ParallelTestCoordinatorServiceTest extends TestCase
             $this->assertContains('before_provision', $hooksFired);
             $this->assertContains('after_provision', $hooksFired);
             $this->assertContains('before_cleanup', $hooksFired);
+        } finally {
+            $this->cleanupDir($logDir);
+        }
+    }
+
+    public function test_coordinator_passes_ignore_lock_and_keep_databases_into_contexts(): void
+    {
+        $logDir = sys_get_temp_dir() . '/ptr-test-' . uniqid();
+        mkdir($logDir, 0755, true);
+
+        try {
+            $configService = $this->createConfigService();
+            $configService->setParallelProcesses(2)
+                ->setSplitTotal(6)
+                ->setSplitGroup(3)
+                ->setIgnoreLock(true)
+                ->setOptions([
+                    'no_refresh_db' => true,
+                    'keep_parallel_dbs' => true,
+                ]);
+
+            $provisioner = $this->createMock(DatabaseProvisionerInterface::class);
+            $provisioner->expects($this->once())
+                ->method('provision')
+                ->willReturnCallback(function (int $workerCount, ProvisionContext $context): array {
+                    $this->assertSame(2, $workerCount);
+                    $this->assertTrue($context->extraOptions['no_refresh_db']);
+                    $this->assertSame(6, $context->extraOptions['split_total']);
+                    $this->assertSame(3, $context->extraOptions['split_group']);
+                    $this->assertTrue($context->extraOptions['ignore_lock']);
+                    $this->assertIsCallable($context->extraOptions['on_progress']);
+
+                    return [1 => 'db_w1', 2 => 'db_w2'];
+                });
+
+            $provisioner->expects($this->once())
+                ->method('cleanup')
+                ->willReturnCallback(function (CleanupContext $context): void {
+                    $this->assertTrue($context->keepDatabases);
+                    $this->assertSame(['db_w1', 'db_w2'], $context->databases);
+                });
+
+            $scheduler = $this->createStub(ParallelSectionScheduler::class);
+            $scheduler->method('createWorkerPlans')
+                ->willReturn([]);
+
+            $service = new ParallelTestCoordinatorService(
+                $configService,
+                new TestRunnerState(),
+                new TestExecutionTracker($logDir),
+                $provisioner,
+                $scheduler,
+                $this->app->make(HookDispatcher::class),
+            );
+
+            $output = new OutputStyle(new ArrayInput([]), new NullOutput());
+
+            $service->runParallelSections(
+                [$this->makeSection('tests/Unit/FooTest')],
+                $logDir,
+                $output,
+            );
+        } finally {
+            $this->cleanupDir($logDir);
+        }
+    }
+
+    public function test_coordinator_cleans_up_when_scheduler_throws(): void
+    {
+        $logDir = sys_get_temp_dir() . '/ptr-test-' . uniqid();
+        mkdir($logDir, 0755, true);
+
+        try {
+            $configService = $this->createConfigService();
+            $configService->setParallelProcesses(1);
+
+            $provisioner = $this->createMock(DatabaseProvisionerInterface::class);
+            $provisioner->expects($this->once())
+                ->method('provision')
+                ->willReturn([1 => 'db_w1']);
+
+            $provisioner->expects($this->once())
+                ->method('cleanup')
+                ->willReturnCallback(function (CleanupContext $context): void {
+                    $this->assertSame(['db_w1'], $context->databases);
+                });
+
+            $scheduler = $this->createMock(ParallelSectionScheduler::class);
+            $scheduler->expects($this->once())
+                ->method('createWorkerPlans')
+                ->willThrowException(new \RuntimeException('scheduler failed'));
+
+            $service = new ParallelTestCoordinatorService(
+                $configService,
+                new TestRunnerState(),
+                new TestExecutionTracker($logDir),
+                $provisioner,
+                $scheduler,
+                $this->app->make(HookDispatcher::class),
+            );
+
+            $output = new OutputStyle(new ArrayInput([]), new NullOutput());
+
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('scheduler failed');
+
+            $service->runParallelSections(
+                [$this->makeSection('tests/Unit/FooTest')],
+                $logDir,
+                $output,
+            );
+        } finally {
+            $this->cleanupDir($logDir);
+        }
+    }
+
+    public function test_coordinator_reports_provisioning_progress_to_output(): void
+    {
+        $logDir = sys_get_temp_dir() . '/ptr-test-' . uniqid();
+        mkdir($logDir, 0755, true);
+
+        try {
+            $configService = $this->createConfigService();
+            $configService->setParallelProcesses(1);
+
+            $provisioner = $this->createMock(DatabaseProvisionerInterface::class);
+            $provisioner->expects($this->once())
+                ->method('provision')
+                ->willReturnCallback(function (int $workerCount, ProvisionContext $context): array {
+                    $callback = $context->extraOptions['on_progress'];
+                    $callback('Provisioning database db_w1');
+
+                    return [1 => 'db_w1'];
+                });
+
+            $provisioner->expects($this->once())
+                ->method('cleanup');
+
+            $scheduler = $this->createStub(ParallelSectionScheduler::class);
+            $scheduler->method('createWorkerPlans')
+                ->willReturn([]);
+
+            $service = new ParallelTestCoordinatorService(
+                $configService,
+                new TestRunnerState(),
+                new TestExecutionTracker($logDir),
+                $provisioner,
+                $scheduler,
+                $this->app->make(HookDispatcher::class),
+            );
+
+            $buffer = new BufferedOutput();
+            $output = new OutputStyle(new ArrayInput([]), $buffer);
+
+            $service->runParallelSections(
+                [$this->makeSection('tests/Unit/FooTest')],
+                $logDir,
+                $output,
+            );
+
+            $this->assertStringContainsString('Provisioning database db_w1', $buffer->fetch());
         } finally {
             $this->cleanupDir($logDir);
         }

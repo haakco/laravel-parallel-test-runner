@@ -37,6 +37,7 @@ class ParallelTestCoordinatorService
 
         $noRefreshDb = (bool) ($this->config->options['no_refresh_db'] ?? false);
         $keepDbs = (bool) ($this->config->options['keep_parallel_dbs'] ?? false);
+        $databases = [];
 
         $provisionContext = new ProvisionContext(
             connection: $this->config->getBaseConfig()->dbConnection,
@@ -48,67 +49,75 @@ class ParallelTestCoordinatorService
                 'no_refresh_db' => $noRefreshDb,
                 'split_total' => $this->config->splitTotal,
                 'split_group' => $this->config->splitGroup,
+                'ignore_lock' => $this->config->ignoreLock,
+                'on_progress' => static function (string $message) use ($output): void {
+                    $output->writeln('  ' . $message);
+                },
             ],
         );
 
-        $this->hookDispatcher->fire('before_provision', [$provisionContext]);
+        try {
+            $this->hookDispatcher->fire('before_provision', [$provisionContext]);
 
-        $databases = $this->provisioner->provision(
-            $this->config->parallelProcesses,
-            $provisionContext,
-        );
+            $databases = $this->provisioner->provision(
+                $this->config->parallelProcesses,
+                $provisionContext,
+            );
 
-        $this->hookDispatcher->fire('after_provision', [$provisionContext, $databases]);
+            $this->hookDispatcher->fire('after_provision', [$provisionContext, $databases]);
 
-        $workerPlans = $this->scheduler->createWorkerPlans(
-            $sections,
-            $this->config->parallelProcesses,
-            $databases,
-            $logDirectory,
-            'standard',
-            $this->config->individual,
-        );
+            $workerPlans = $this->scheduler->createWorkerPlans(
+                $sections,
+                $this->config->parallelProcesses,
+                $databases,
+                $logDirectory,
+                'standard',
+                $this->config->individual,
+            );
 
-        $this->saveExecutionPlan($workerPlans, $logDirectory);
+            $this->saveExecutionPlan($workerPlans, $logDirectory);
 
-        $orchestrator = new ParallelTestOrchestrator(
-            output: $output,
-            logDirectory: $logDirectory,
-            timeoutSeconds: $this->config->timeoutSeconds,
-            debug: $this->config->debug,
-            failFast: $this->config->failFast,
-        );
+            $orchestrator = new ParallelTestOrchestrator(
+                output: $output,
+                logDirectory: $logDirectory,
+                timeoutSeconds: $this->config->timeoutSeconds,
+                debug: $this->config->debug,
+                failFast: $this->config->failFast,
+            );
 
-        $success = $orchestrator->executeWorkerPlans($workerPlans);
+            $success = $orchestrator->executeWorkerPlans($workerPlans);
 
-        $sectionResults = $orchestrator->getSectionResults();
+            $sectionResults = $orchestrator->getSectionResults();
 
-        foreach ($sectionResults as $sectionName => $resultData) {
-            $result = $resultData ?? SectionResultData::createEmpty();
+            foreach ($sectionResults as $sectionName => $resultData) {
+                $result = $resultData ?? SectionResultData::createEmpty();
 
-            if ($result->success) {
-                $this->state->markCompleted($sectionName);
-            } else {
-                $this->state->markFailed($sectionName);
+                if ($result->success) {
+                    $this->state->markCompleted($sectionName);
+                } else {
+                    $this->state->markFailed($sectionName);
+                }
+
+                $this->tracker->recordSectionResult($sectionName, $result);
             }
 
-            $this->tracker->recordSectionResult($sectionName, $result);
+            $metrics = $orchestrator->getAggregatedMetrics();
+            $this->tracker->updateFromAggregatedMetrics($metrics);
+
+            return $success;
+        } finally {
+            if ($databases !== []) {
+                $cleanupContext = new CleanupContext(
+                    databases: array_values($databases),
+                    connection: $this->config->getBaseConfig()->dbConnection,
+                    keepDatabases: $keepDbs,
+                    extraOptions: [],
+                );
+
+                $this->hookDispatcher->fire('before_cleanup', [$cleanupContext]);
+                $this->provisioner->cleanup($cleanupContext);
+            }
         }
-
-        $metrics = $orchestrator->getAggregatedMetrics();
-        $this->tracker->updateFromAggregatedMetrics($metrics);
-
-        $cleanupContext = new CleanupContext(
-            databases: array_values($databases),
-            connection: $this->config->getBaseConfig()->dbConnection,
-            keepDatabases: $keepDbs,
-            extraOptions: [],
-        );
-
-        $this->hookDispatcher->fire('before_cleanup', [$cleanupContext]);
-        $this->provisioner->cleanup($cleanupContext);
-
-        return $success;
     }
 
     /**

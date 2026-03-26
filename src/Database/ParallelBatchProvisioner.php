@@ -127,11 +127,30 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
                 $dbName = $databases[$workerId];
 
                 try {
+                    $this->reportProgress(
+                        $context,
+                        sprintf(
+                            'Provisioning database %s (worker %d, attempt %d/%d)',
+                            $dbName,
+                            $workerId,
+                            $attempt + 1,
+                            $maxRetries + 1,
+                        ),
+                    );
                     $this->provisionSingleDatabase($dbName, $context, $workerId);
                     $this->createdDatabases[] = $dbName;
                 } catch (Throwable $e) {
                     $failures[$workerId] = $e->getMessage();
                     $stillFailed[] = $workerId;
+                    $this->reportProgress(
+                        $context,
+                        sprintf(
+                            'Provisioning failed for %s (worker %d): %s',
+                            $dbName,
+                            $workerId,
+                            $e->getMessage(),
+                        ),
+                    );
                 }
             }
 
@@ -215,11 +234,15 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
                 $this->schemaLoader->loadSchema($context->connection, $dbName);
             }
 
-            Artisan::call('migrate:fresh', [
-                '--database' => $context->connection,
-                '--force' => true,
-                '--step' => true,
-            ]);
+            $this->runMigrationCommand(
+                'migrate:fresh',
+                [
+                    '--database' => $context->connection,
+                    '--force' => true,
+                    '--step' => true,
+                ],
+                $context,
+            );
         } finally {
             DB::purge($context->connection);
             config(["database.connections.{$context->connection}.database" => $originalDb]);
@@ -280,11 +303,15 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
             DB::purge($context->connection);
             DB::reconnect($context->connection);
 
-            Artisan::call('migrate', [
-                '--database' => $context->connection,
-                '--force' => true,
-                '--step' => true,
-            ]);
+            $this->runMigrationCommand(
+                'migrate',
+                [
+                    '--database' => $context->connection,
+                    '--force' => true,
+                    '--step' => true,
+                ],
+                $context,
+            );
         } finally {
             DB::purge($context->connection);
             config(["database.connections.{$context->connection}.database" => $originalDb]);
@@ -299,5 +326,75 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
             workerPattern: (string) config('parallel-test-runner.db_naming.pattern', '{base}_w{worker}'),
             splitPattern: (string) config('parallel-test-runner.db_naming.split_pattern', '{base}_s{total}g{group}_w{worker}'),
         );
+    }
+
+    /**
+     * @param array<string, bool|string> $arguments
+     */
+    private function runMigrationCommand(string $command, array $arguments, ProvisionContext $context): void
+    {
+        $this->withMigrationLockOverride(
+            $context,
+            static fn(): int => Artisan::call($command, $arguments),
+        );
+    }
+
+    private function withMigrationLockOverride(ProvisionContext $context, callable $callback): void
+    {
+        $ignoreLock = (bool) ($context->extraOptions['ignore_lock'] ?? false);
+
+        if (! $ignoreLock) {
+            $callback();
+
+            return;
+        }
+
+        $originalEnv = getenv('TEST_IGNORE_MIGRATION_LOCK');
+        $originalServer = $_SERVER['TEST_IGNORE_MIGRATION_LOCK'] ?? null;
+        $originalGlobal = $_ENV['TEST_IGNORE_MIGRATION_LOCK'] ?? null;
+
+        putenv('TEST_IGNORE_MIGRATION_LOCK=1');
+        $_SERVER['TEST_IGNORE_MIGRATION_LOCK'] = '1';
+        $_ENV['TEST_IGNORE_MIGRATION_LOCK'] = '1';
+
+        try {
+            $callback();
+        } finally {
+            $this->restoreEnvValue('TEST_IGNORE_MIGRATION_LOCK', $originalEnv, $originalServer, $originalGlobal);
+        }
+    }
+
+    private function restoreEnvValue(
+        string $key,
+        string|false $originalEnv,
+        mixed $originalServer,
+        mixed $originalGlobal,
+    ): void {
+        if ($originalEnv === false) {
+            putenv($key);
+        } else {
+            putenv(sprintf('%s=%s', $key, $originalEnv));
+        }
+
+        if ($originalServer === null) {
+            unset($_SERVER[$key]);
+        } else {
+            $_SERVER[$key] = $originalServer;
+        }
+
+        if ($originalGlobal === null) {
+            unset($_ENV[$key]);
+        } else {
+            $_ENV[$key] = $originalGlobal;
+        }
+    }
+
+    private function reportProgress(ProvisionContext $context, string $message): void
+    {
+        $callback = $context->extraOptions['on_progress'] ?? null;
+
+        if (is_callable($callback)) {
+            $callback($message);
+        }
     }
 }
