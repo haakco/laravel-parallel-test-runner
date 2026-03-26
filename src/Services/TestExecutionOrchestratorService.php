@@ -45,11 +45,49 @@ class TestExecutionOrchestratorService
 
         $this->emitRunReport($logDirectory, $successful, $start, $finished, $duration);
 
+        $totals = $this->tracker->getTotals();
+        $tests = (int) ($totals['tests'] ?? 0);
+        $assertions = (int) ($totals['assertions'] ?? 0);
+        $errors = (int) ($totals['errors'] ?? 0);
+        $failures = (int) ($totals['failures'] ?? 0);
+        $skipped = (int) ($totals['skipped'] ?? 0);
+
+        $failureDetails = $this->buildFailureDetails();
+
         $summary = $successful ? 'All tests passed' : 'Some tests failed';
 
         return $successful
-            ? TestRunResultData::success($summary, $duration)
-            : TestRunResultData::failure($summary, $duration);
+            ? TestRunResultData::success($summary, $duration, $tests, $assertions, $logDirectory)
+            : TestRunResultData::failure($summary, $duration, 1, $errors, $failures, $tests, $assertions, $skipped, $logDirectory, $failureDetails);
+    }
+
+    /** @return list<array{section: string, summary: string, rerun_command: string}> */
+    private function buildFailureDetails(): array
+    {
+        $executionData = $this->tracker->getExecutionData();
+        $sections = $executionData['sections'] ?? [];
+        $failures = [];
+
+        foreach ($sections as $name => $section) {
+            if (($section['status'] ?? '') !== 'failed') {
+                continue;
+            }
+
+            $results = $section['results'] ?? [];
+            $errors = (int) ($results['errors'] ?? 0);
+            $failureCount = (int) ($results['failures'] ?? 0);
+
+            $failures[] = [
+                'section' => (string) $name,
+                'summary' => sprintf('E:%d F:%d', $errors, $failureCount),
+                'rerun_command' => sprintf(
+                    "php artisan test:run-sections --section='%s' --individual --parallel=1 --fail-fast",
+                    (string) $name,
+                ),
+            ];
+        }
+
+        return $failures;
     }
 
     /** @param array<string, mixed> $options */

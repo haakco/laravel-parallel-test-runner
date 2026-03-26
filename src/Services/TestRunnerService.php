@@ -147,18 +147,16 @@ class TestRunnerService
     private function removeExistingLatestPath(string $latest): void
     {
         if (is_link($latest)) {
-            // Another process can remove the symlink between the existence
-            // check and unlink. Ignore that specific race, but keep surfacing
-            // real filesystem failures.
-            if (! @unlink($latest) && is_link($latest)) {
-                throw new \RuntimeException(sprintf('Unable to remove symlink at [%s].', $latest));
-            }
+            // `latest` is only a convenience pointer. Under concurrent starts
+            // another process may delete or recreate it between these calls, so
+            // cleanup must remain best-effort.
+            @unlink($latest);
 
             return;
         }
 
         if (File::exists($latest)) {
-            File::deleteDirectory($latest);
+            @File::deleteDirectory($latest);
         }
     }
 
