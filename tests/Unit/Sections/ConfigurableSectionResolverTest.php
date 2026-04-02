@@ -78,6 +78,34 @@ final class ConfigurableSectionResolverTest extends TestCase
         $this->assertContains('Unit/Models', $names);
     }
 
+    public function test_discovers_test_files_that_only_contain_abstract_class_text_in_heredocs(): void
+    {
+        $context = new SectionResolutionContext(
+            scanPaths: [$this->fixtureTestsPath . "/Unit"],
+            forceSplitDirectories: [],
+            individual: false,
+            sections: [],
+            tests: [],
+            filter: null,
+            testSuite: null,
+            splitTotal: null,
+            splitGroup: null,
+            additionalSuites: [],
+            extraOptions: ["max_files_per_section" => 10],
+        );
+
+        $sections = $this->resolver->resolve($context);
+
+        $allFiles = [];
+        foreach ($sections as $section) {
+            foreach ($section->files as $file) {
+                $allFiles[] = basename($file);
+            }
+        }
+
+        $this->assertContains("HeredocFixtureTest.php", $allFiles);
+    }
+
     public function test_excludes_abstract_test_classes(): void
     {
         $context = new SectionResolutionContext(
@@ -275,5 +303,111 @@ final class ConfigurableSectionResolverTest extends TestCase
         $this->assertCount(1, $sections);
         $this->assertSame('Unit/Models/UserModelTest.php', $sections[0]->name);
         $this->assertSame($this->fixtureTestsPath . '/Unit/Models/UserModelTest.php', $sections[0]->path);
+    }
+
+    public function test_does_not_treat_heredoc_fixture_text_as_an_abstract_test_class(): void
+    {
+        $tempDirectory = sys_get_temp_dir() . '/parallel-test-runner-' . uniqid('', true);
+        mkdir($tempDirectory, 0777, true);
+
+        $testFilePath = $tempDirectory . '/FixtureTextTest.php';
+        file_put_contents($testFilePath, <<<'PHP_WRAP'
+        <?php
+        
+        declare(strict_types=1);
+        
+        namespace Haakco\ParallelTestRunner\Tests\Fixtures;
+        
+        final class FixtureTextTest extends \PHPUnit\Framework\TestCase
+        {
+            public function test_fixture_text(): void
+            {
+                $fixture = <<<'INNER'
+        abstract class ParentConstants
+        {
+        }
+        INNER;
+        
+                self::assertNotSame('', $fixture);
+            }
+        }
+        PHP_WRAP);
+
+        try {
+            $context = new SectionResolutionContext(
+                scanPaths: [$tempDirectory],
+                forceSplitDirectories: [],
+                individual: false,
+                sections: [],
+                tests: [],
+                filter: null,
+                testSuite: null,
+                splitTotal: null,
+                splitGroup: null,
+                additionalSuites: [],
+                extraOptions: ['max_files_per_section' => 10],
+            );
+
+            $sections = $this->resolver->resolve($context);
+
+            $this->assertCount(1, $sections);
+            $this->assertSame(basename($tempDirectory), $sections[0]->name);
+            $this->assertSame([$testFilePath], $sections[0]->files);
+        } finally {
+            unlink($testFilePath);
+            rmdir($tempDirectory);
+        }
+    }
+
+    public function test_does_not_skip_a_file_that_contains_an_abstract_helper_and_a_concrete_test(): void
+    {
+        $tempDirectory = sys_get_temp_dir() . '/parallel-test-runner-' . uniqid('', true);
+        mkdir($tempDirectory, 0777, true);
+
+        $testFilePath = $tempDirectory . '/ConcreteTest.php';
+        file_put_contents($testFilePath, <<<'PHP_WRAP'
+        <?php
+        
+        declare(strict_types=1);
+        
+        namespace Haakco\ParallelTestRunner\Tests\Fixtures;
+        
+        abstract class HelperTestCase extends \PHPUnit\Framework\TestCase
+        {
+        }
+        
+        final class ConcreteTest extends HelperTestCase
+        {
+            public function test_concrete_case(): void
+            {
+                self::assertTrue(true);
+            }
+        }
+        PHP_WRAP);
+
+        try {
+            $context = new SectionResolutionContext(
+                scanPaths: [$tempDirectory],
+                forceSplitDirectories: [],
+                individual: false,
+                sections: [],
+                tests: [],
+                filter: null,
+                testSuite: null,
+                splitTotal: null,
+                splitGroup: null,
+                additionalSuites: [],
+                extraOptions: ['max_files_per_section' => 10],
+            );
+
+            $sections = $this->resolver->resolve($context);
+
+            $this->assertCount(1, $sections);
+            $this->assertSame(basename($tempDirectory), $sections[0]->name);
+            $this->assertSame([$testFilePath], $sections[0]->files);
+        } finally {
+            unlink($testFilePath);
+            rmdir($tempDirectory);
+        }
     }
 }

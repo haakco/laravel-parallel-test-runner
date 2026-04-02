@@ -183,7 +183,70 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
             return false;
         }
 
-        return preg_match('/^\s*abstract\s+class\s+/m', $content) === 1;
+        $tokens = token_get_all($content);
+        $classBraceDepths = [];
+        $braceDepth = 0;
+        $pendingAbstract = false;
+        $waitingForClassBody = false;
+        $pendingTopLevelClassIsAbstract = false;
+        $topLevelClassAbstractStates = [];
+        $previousMeaningfulToken = null;
+
+        foreach ($tokens as $token) {
+            if (is_array($token)) {
+                $tokenId = $token[0];
+
+                if (in_array($tokenId, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_OPEN_TAG], true)) {
+                    continue;
+                }
+
+                if ($tokenId === T_ABSTRACT && $classBraceDepths === []) {
+                    $pendingAbstract = true;
+                    $previousMeaningfulToken = $tokenId;
+
+                    continue;
+                }
+
+                if ($tokenId === T_CLASS && $previousMeaningfulToken !== T_NEW && $previousMeaningfulToken !== '::') {
+                    $waitingForClassBody = true;
+                    $pendingTopLevelClassIsAbstract = $pendingAbstract && $classBraceDepths === [];
+                    $pendingAbstract = false;
+                    $previousMeaningfulToken = $tokenId;
+
+                    continue;
+                }
+
+                $pendingAbstract = false;
+                $previousMeaningfulToken = $tokenId;
+
+                continue;
+            }
+
+            if ($token === '{') {
+                $braceDepth++;
+
+                if ($waitingForClassBody) {
+                    $classBraceDepths[] = $braceDepth;
+                    $topLevelClassAbstractStates[] = $pendingTopLevelClassIsAbstract;
+                    $waitingForClassBody = false;
+                    $pendingTopLevelClassIsAbstract = false;
+                }
+            } elseif ($token === '}') {
+                if ($classBraceDepths !== [] && end($classBraceDepths) === $braceDepth) {
+                    array_pop($classBraceDepths);
+                }
+
+                $braceDepth = max(0, $braceDepth - 1);
+            }
+
+            if (trim($token) !== '') {
+                $pendingAbstract = false;
+                $previousMeaningfulToken = $token;
+            }
+        }
+
+        return $topLevelClassAbstractStates !== []
+            && ! in_array(false, $topLevelClassAbstractStates, true);
     }
 
     private function resolveAbsolutePath(string $path): string
