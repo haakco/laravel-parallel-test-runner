@@ -8,6 +8,7 @@ use Haakco\ParallelTestRunner\Data\SectionResolutionContext;
 use Haakco\ParallelTestRunner\Data\TestSectionData;
 use Haakco\ParallelTestRunner\Sections\ConfigurableSectionResolver;
 use Haakco\ParallelTestRunner\Tests\TestCase;
+use Illuminate\Support\Facades\File;
 use Override;
 
 final class ConfigurableSectionResolverTest extends TestCase
@@ -303,6 +304,68 @@ final class ConfigurableSectionResolverTest extends TestCase
         $this->assertCount(1, $sections);
         $this->assertSame('Unit/Models/UserModelTest.php', $sections[0]->name);
         $this->assertSame($this->fixtureTestsPath . '/Unit/Models/UserModelTest.php', $sections[0]->path);
+    }
+
+    public function test_filters_sections_to_explicit_test_files_with_canonical_relative_paths(): void
+    {
+        $context = new SectionResolutionContext(
+            scanPaths: [
+                $this->fixtureTestsPath . '/Unit',
+                $this->fixtureTestsPath . '/Feature',
+            ],
+            forceSplitDirectories: [],
+            individual: true,
+            sections: [],
+            tests: [$this->fixtureTestsPath . '/Unit/Models/../Models/UserModelTest.php'],
+            filter: null,
+            testSuite: null,
+            splitTotal: null,
+            splitGroup: null,
+            additionalSuites: [],
+            extraOptions: ['max_files_per_section' => 10],
+        );
+
+        $sections = $this->resolver->resolve($context);
+
+        $this->assertCount(1, $sections);
+        $this->assertSame('Unit/Models/UserModelTest.php', $sections[0]->name);
+        $this->assertSame($this->fixtureTestsPath . '/Unit/Models/UserModelTest.php', $sections[0]->path);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function windowsAbsolutePathProvider(): array
+    {
+        return [
+            'drive-letter path' => ['C:\\project\\tests\\Unit'],
+            'unc path' => ['\\\\server\\share\\tests\\Unit'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('windowsAbsolutePathProvider')]
+    public function test_resolve_treats_windows_absolute_paths_as_absolute(string $windowsPath): void
+    {
+        File::shouldReceive('exists')
+            ->once()
+            ->with($windowsPath)
+            ->andReturnFalse();
+
+        $sections = $this->resolver->resolve(new SectionResolutionContext(
+            scanPaths: [$windowsPath],
+            forceSplitDirectories: [],
+            individual: false,
+            sections: [],
+            tests: [],
+            filter: null,
+            testSuite: null,
+            splitTotal: null,
+            splitGroup: null,
+            additionalSuites: [],
+            extraOptions: [],
+        ));
+
+        $this->assertSame([], $sections);
     }
 
     public function test_does_not_treat_heredoc_fixture_text_as_an_abstract_test_class(): void

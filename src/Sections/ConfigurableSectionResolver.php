@@ -251,7 +251,7 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
 
     private function resolveAbsolutePath(string $path): string
     {
-        if (str_starts_with($path, '/')) {
+        if ($this->isAbsolutePath($path)) {
             return $path;
         }
 
@@ -266,20 +266,91 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
     private function filterByExplicitTests(array $sections, array $tests): array
     {
         $normalizedTests = array_map(
-            $this->resolveAbsolutePath(...),
+            $this->normalizePathForComparison(...),
             $tests,
         );
 
         return array_values(array_filter(
             $sections,
-            static function (TestSectionData $section) use ($normalizedTests): bool {
-                if (in_array($section->path, $normalizedTests, true)) {
+            function (TestSectionData $section) use ($normalizedTests): bool {
+                if (in_array($this->normalizePathForComparison($section->path), $normalizedTests, true)) {
                     return true;
                 }
 
-                return array_any($section->files, fn($file): bool => in_array($file, $normalizedTests, true));
+                return array_any(
+                    $section->files,
+                    fn($file): bool => in_array($this->normalizePathForComparison($file), $normalizedTests, true),
+                );
             }
         ));
+    }
+
+    private function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/')
+            || str_starts_with($path, '\\\\')
+            || preg_match('/^[A-Za-z]:[\\\\\\/]/', $path) === 1;
+    }
+
+    private function normalizePathForComparison(string $path): string
+    {
+        $resolvedPath = $this->resolveAbsolutePath($path);
+        $realPath = realpath($resolvedPath);
+
+        if ($realPath !== false) {
+            $resolvedPath = $realPath;
+        }
+
+        $normalizedPath = str_replace('\\', '/', $resolvedPath);
+
+        if (preg_match('#^//([^/]+)/([^/]+)(/.*)?$#', $normalizedPath, $matches) === 1) {
+            return '//' . $matches[1] . '/' . $matches[2] . $this->normalizePathSuffix($matches[3] ?? '/');
+        }
+
+        if (preg_match('#^([A-Za-z]:)(/.*)?$#', $normalizedPath, $matches) === 1) {
+            return strtoupper($matches[1]) . $this->normalizePathSuffix($matches[2] ?? '/');
+        }
+
+        return $this->normalizePathSuffix($normalizedPath);
+    }
+
+    private function normalizePathSuffix(string $path): string
+    {
+        $isAbsolute = str_starts_with($path, '/');
+        $segments = array_values(array_filter(
+            explode('/', trim($path, '/')),
+            static fn(string $segment): bool => $segment !== '',
+        ));
+        $normalizedSegments = [];
+
+        foreach ($segments as $segment) {
+            if ($segment === '.') {
+                continue;
+            }
+
+            if ($segment === '..') {
+                if ($normalizedSegments !== [] && end($normalizedSegments) !== '..') {
+                    array_pop($normalizedSegments);
+                    continue;
+                }
+
+                if (! $isAbsolute) {
+                    $normalizedSegments[] = $segment;
+                }
+
+                continue;
+            }
+
+            $normalizedSegments[] = $segment;
+        }
+
+        $collapsed = implode('/', $normalizedSegments);
+
+        if ($isAbsolute) {
+            return '/' . $collapsed;
+        }
+
+        return $collapsed;
     }
 
     private function buildCacheKey(SectionResolutionContext $context): string
