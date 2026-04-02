@@ -220,6 +220,79 @@ final class JsonRunReportWriterTest extends TestCase
         $this->assertSame(['--parallel=2'], $report['command_args']);
     }
 
+    public function test_command_args_preserve_quoted_arguments_with_spaces(): void
+    {
+        $this->writeTrackingFile($this->successTrackingData());
+
+        $writer = $this->makeWriter();
+        $context = $this->makeContext(
+            successful: true,
+            extraOptions: [],
+        );
+        $context = new ReportContext(
+            logDirectory: $context->logDirectory,
+            successful: $context->successful,
+            command: 'php artisan test:run-sections --filter="Name with spaces" --parallel=2',
+            summaryFile: $context->summaryFile,
+            extraOptions: $context->extraOptions,
+        );
+
+        $writer->write($context);
+
+        $report = $this->readReport();
+
+        $this->assertSame(
+            ['--filter=Name with spaces', '--parallel=2'],
+            $report['command_args'],
+        );
+    }
+
+    public function test_command_args_preserve_empty_quoted_arguments(): void
+    {
+        $this->writeTrackingFile($this->successTrackingData());
+
+        $writer = $this->makeWriter();
+        $context = new ReportContext(
+            logDirectory: $this->logDirectory,
+            successful: true,
+            command: 'php artisan test:run-sections "" --parallel=2',
+            summaryFile: $this->logDirectory . '/summary.json',
+            extraOptions: [],
+        );
+
+        $writer->write($context);
+
+        $report = $this->readReport();
+
+        $this->assertSame(
+            ['', '--parallel=2'],
+            $report['command_args'],
+        );
+    }
+
+    public function test_command_args_preserve_backslashes_inside_single_quoted_arguments(): void
+    {
+        $this->writeTrackingFile($this->successTrackingData());
+
+        $writer = $this->makeWriter();
+        $context = new ReportContext(
+            logDirectory: $this->logDirectory,
+            successful: true,
+            command: "php artisan test:run-sections --filter='C:\\Program Files\\App' --parallel=2",
+            summaryFile: $this->logDirectory . '/summary.json',
+            extraOptions: [],
+        );
+
+        $writer->write($context);
+
+        $report = $this->readReport();
+
+        $this->assertSame(
+            ['--filter=C:\Program Files\App', '--parallel=2'],
+            $report['command_args'],
+        );
+    }
+
     public function test_counters_include_all_fields(): void
     {
         $this->writeTrackingFile($this->successTrackingData());

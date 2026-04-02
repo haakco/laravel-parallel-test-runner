@@ -279,7 +279,7 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
 
                 return array_any(
                     $section->files,
-                    fn($file): bool => in_array($this->normalizePathForComparison($file), $normalizedTests, true),
+                    fn(string $file): bool => in_array($this->normalizePathForComparison($file), $normalizedTests, true),
                 );
             }
         ));
@@ -331,6 +331,7 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
             if ($segment === '..') {
                 if ($normalizedSegments !== [] && end($normalizedSegments) !== '..') {
                     array_pop($normalizedSegments);
+
                     continue;
                 }
 

@@ -197,7 +197,15 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
      */
     private function extractCommandArgs(ReportContext $context): array
     {
-        $parts = preg_split('/\s+/', trim($context->command)) ?: [];
+        $explicitArgs = $context->extraOptions['command_args'] ?? null;
+        if (is_array($explicitArgs)) {
+            /** @var list<string> $args */
+            $args = array_values(array_filter($explicitArgs, is_string(...)));
+
+            return $args;
+        }
+
+        $parts = $this->tokenizeCommand($context->command);
 
         if ($parts === []) {
             return [];
@@ -208,6 +216,76 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
         }
 
         return array_slice($parts, 1);
+    }
+
+    /**
+     * Tokenize a shell-style command string while preserving quoted values.
+     *
+     * @return list<string>
+     */
+    private function tokenizeCommand(string $command): array
+    {
+        $tokens = [];
+        $token = '';
+        $length = strlen($command);
+        $inSingleQuotes = false;
+        $inDoubleQuotes = false;
+        $tokenStarted = false;
+
+        for ($cursor = 0; $cursor < $length; $cursor++) {
+            $character = $command[$cursor];
+
+            if ($character === '\\') {
+                if ($inSingleQuotes) {
+                    $token .= $character;
+                    $tokenStarted = true;
+
+                    continue;
+                }
+
+                $cursor++;
+
+                if ($cursor < $length) {
+                    $token .= $command[$cursor];
+                    $tokenStarted = true;
+                }
+
+                continue;
+            }
+
+            if ($character === "'" && ! $inDoubleQuotes) {
+                $inSingleQuotes = ! $inSingleQuotes;
+                $tokenStarted = true;
+
+                continue;
+            }
+
+            if ($character === '"' && ! $inSingleQuotes) {
+                $inDoubleQuotes = ! $inDoubleQuotes;
+                $tokenStarted = true;
+
+                continue;
+            }
+
+            if (ctype_space($character) && ! $inSingleQuotes && ! $inDoubleQuotes) {
+                if ($tokenStarted) {
+                    $tokens[] = $token;
+                    $token = '';
+                    $tokenStarted = false;
+                }
+
+                continue;
+            }
+
+            $token .= $character;
+            $tokenStarted = true;
+        }
+
+        if ($tokenStarted) {
+            $tokens[] = $token;
+        }
+
+        return $tokens;
     }
 
     /**

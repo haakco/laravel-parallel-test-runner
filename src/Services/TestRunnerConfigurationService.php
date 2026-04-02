@@ -227,9 +227,19 @@ class TestRunnerConfigurationService
         )->values();
     }
 
+    /**
+     * Render the process environment as a shell-safe prefix string for callers
+     * that need inline `KEY=value` fragments.
+     *
+     * The runtime process environment itself is applied separately via
+     * getProcessEnvironment().
+     */
     public function buildEnvironmentPrefix(): string
     {
-        return $this->buildEnvironmentParts()->implode(' ');
+        return $this->getProcessEnvironment()
+            ->map(static fn(string $value, string $key): string => sprintf('%s=%s', $key, escapeshellarg($value)))
+            ->values()
+            ->implode(' ');
     }
 
     public function configure(TestRunOptionsData $options, OutputStyle $output): TestRunnerConfigurationFeedbackData

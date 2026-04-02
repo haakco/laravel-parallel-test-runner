@@ -15,6 +15,7 @@ use Haakco\ParallelTestRunner\Data\TestRunOptionsData;
 use Haakco\ParallelTestRunner\Data\TestSectionData;
 use Haakco\ParallelTestRunner\Services\TestRunnerService;
 use Haakco\ParallelTestRunner\Tests\TestCase;
+use Illuminate\Support\Facades\Artisan;
 use Mockery;
 use Mockery\MockInterface;
 use RuntimeException;
@@ -23,12 +24,22 @@ final class TestRunSectionsCommandTest extends TestCase
 {
     private MockInterface&TestRunnerService $testRunner;
 
+    private string $originalBasePath;
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        $this->originalBasePath = $this->app->basePath();
         $this->testRunner = Mockery::mock(TestRunnerService::class);
         $this->app->instance(TestRunnerService::class, $this->testRunner);
+    }
+
+    protected function tearDown(): void
+    {
+        $this->app->setBasePath($this->originalBasePath);
+
+        parent::tearDown();
     }
 
     public function test_command_is_registered(): void
@@ -368,5 +379,138 @@ final class TestRunSectionsCommandTest extends TestCase
         $this->artisan('test:run-sections', ['--refresh-db' => true])
             ->expectsOutputToContain('Database refreshed successfully')
             ->assertSuccessful();
+    }
+
+    public function test_refresh_db_failure_stops_the_command(): void
+    {
+        $this->testRunner
+            ->shouldReceive('refreshTestDatabase')
+            ->once()
+            ->andReturn(DatabaseRefreshResultData::failure('boom'));
+
+        $this->testRunner
+            ->shouldNotReceive('configure');
+
+        $this->testRunner
+            ->shouldNotReceive('runConfigured');
+
+        $this->artisan('test:run-sections', ['--refresh-db' => true])
+            ->expectsOutputToContain('Failed to refresh database: boom')
+            ->assertExitCode(1);
+    }
+
+    public function test_list_output_renders_relative_paths_with_windows_separators(): void
+    {
+        $windowsSectionPath = str_replace('/', '\\', base_path('tests/Unit/Models'));
+
+        $sections = [
+            new TestSectionData(
+                name: 'Unit/Models',
+                type: 'directory',
+                path: $windowsSectionPath,
+                files: ['UserTest.php', 'OrderTest.php'],
+                fileCount: 2,
+            ),
+        ];
+
+        $this->testRunner
+            ->shouldReceive('configure')
+            ->once()
+            ->andReturn(new TestRunnerConfigurationFeedbackData(
+                message: 'Configuration applied',
+                settings: [],
+            ));
+
+        $this->testRunner
+            ->shouldReceive('listSectionsWithGroups')
+            ->with(null, null)
+            ->once()
+            ->andReturn(new SectionListResultData(
+                sections: $sections,
+                totalFiles: 2,
+                totalSections: 1,
+            ));
+
+        $this->artisan('test:run-sections', ['--list' => true])
+            ->expectsOutputToContain('tests/Unit/Models')
+            ->assertSuccessful();
+    }
+
+    public function test_test_run_renders_relative_log_directory_with_windows_separators(): void
+    {
+        $windowsLogDirectory = str_replace('/', '\\', base_path('tests/Unit/Logs'));
+
+        $this->testRunner
+            ->shouldReceive('configure')
+            ->once()
+            ->andReturn(new TestRunnerConfigurationFeedbackData(
+                message: 'Configuration applied',
+                settings: [],
+            ));
+
+        $this->testRunner
+            ->shouldReceive('runConfigured')
+            ->once()
+            ->andReturn(TestRunResultData::success('All tests passed', 2.5, 4, 8, $windowsLogDirectory));
+
+        $this->artisan('test:run-sections')
+            ->expectsOutputToContain('Tests passed')
+            ->expectsOutputToContain('Logs: tests/Unit/Logs')
+            ->assertSuccessful();
+    }
+
+    public function test_list_output_renders_relative_paths_when_base_path_is_a_symlink(): void
+    {
+        $baseDirectory = sys_get_temp_dir() . '/ptr-base-' . uniqid();
+        $realBasePath = $baseDirectory . '-real';
+        $linkedBasePath = $baseDirectory . '-link';
+
+        mkdir($realBasePath . '/tests/Unit', 0777, true);
+        symlink($realBasePath, $linkedBasePath);
+        $this->app->setBasePath($linkedBasePath);
+
+        $sections = [
+            new TestSectionData(
+                name: 'Unit/Models',
+                type: 'directory',
+                path: $realBasePath . '/tests/Unit',
+                files: ['UserTest.php'],
+                fileCount: 1,
+            ),
+        ];
+
+        $this->testRunner
+            ->shouldReceive('configure')
+            ->once()
+            ->andReturn(new TestRunnerConfigurationFeedbackData(
+                message: 'Configuration applied',
+                settings: [],
+            ));
+
+        $this->testRunner
+            ->shouldReceive('listSectionsWithGroups')
+            ->with(null, null)
+            ->once()
+            ->andReturn(new SectionListResultData(
+                sections: $sections,
+                totalFiles: 1,
+                totalSections: 1,
+            ));
+
+        try {
+            $exitCode = Artisan::call('test:run-sections', ['--list' => true]);
+            $output = Artisan::output();
+
+            $this->assertSame(0, $exitCode);
+            $this->assertStringContainsString('tests/Unit', $output);
+            $this->assertMatchesRegularExpression('/\|\s*Unit\/Models\s*\|\s*directory\s*\|\s*1\s*\|\s*tests\/Unit\s*\|/', $output);
+            $this->assertStringNotContainsString($realBasePath, $output);
+            $this->assertStringNotContainsString($linkedBasePath, $output);
+        } finally {
+            unlink($linkedBasePath);
+            @rmdir($realBasePath . '/tests/Unit');
+            @rmdir($realBasePath . '/tests');
+            @rmdir($realBasePath);
+        }
     }
 }

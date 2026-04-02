@@ -69,8 +69,8 @@ final class TestRunSectionsCommand extends Command
             return $this->handleBackgroundRun($optionsData);
         }
 
-        if ($this->option('refresh-db')) {
-            $this->handleDatabaseRefresh();
+        if ($this->option('refresh-db') && $this->handleDatabaseRefresh() === Command::FAILURE) {
+            return Command::FAILURE;
         }
 
         $this->testRunner->configure($optionsData, $this->output);
@@ -176,7 +176,7 @@ final class TestRunSectionsCommand extends Command
         return Command::SUCCESS;
     }
 
-    private function handleDatabaseRefresh(): void
+    private function handleDatabaseRefresh(): int
     {
         $result = $this->testRunner->refreshTestDatabase(
             onProgress: fn(string $message) => $this->info($message),
@@ -186,9 +186,14 @@ final class TestRunSectionsCommand extends Command
             $this->info('Database refreshed successfully!');
         } else {
             $this->error(sprintf('Failed to refresh database: %s', $result->message));
+            $this->newLine();
+
+            return Command::FAILURE;
         }
 
         $this->newLine();
+
+        return Command::SUCCESS;
     }
 
     private function handleFindHanging(): int
@@ -250,7 +255,7 @@ final class TestRunSectionsCommand extends Command
                 $section->name,
                 $section->type,
                 $section->fileCount,
-                str_replace(base_path() . '/', '', $section->path),
+                $this->displayRelativePath($section->path),
             ], $result->sections),
         );
 
@@ -322,10 +327,44 @@ final class TestRunSectionsCommand extends Command
 
         if ($result->logDirectory !== '') {
             $this->newLine();
-            $relativePath = str_replace(base_path() . '/', '', $result->logDirectory);
-            $this->comment('Logs: ' . $relativePath);
+            $this->comment('Logs: ' . $this->displayRelativePath($result->logDirectory));
         }
 
         return $result->exitCode;
+    }
+
+    private function displayRelativePath(string $path): string
+    {
+        $normalizedPath = $this->normalizePathForDisplay($path);
+        $basePath = base_path();
+        $resolvedPath = realpath($path);
+        $resolvedBasePath = realpath($basePath);
+
+        if ($resolvedBasePath !== false) {
+            $basePath = $resolvedBasePath;
+        }
+
+        if ($resolvedPath !== false) {
+            $normalizedPath = $this->normalizePathForDisplay($resolvedPath);
+        }
+
+        $normalizedBasePath = $this->normalizePathForDisplay($basePath);
+
+        $basePrefix = rtrim($normalizedBasePath, '/') . '/';
+
+        if ($normalizedPath === rtrim($normalizedBasePath, '/')) {
+            return '.';
+        }
+
+        if (str_starts_with($normalizedPath, $basePrefix)) {
+            return ltrim(substr($normalizedPath, strlen($basePrefix)), '/');
+        }
+
+        return $normalizedPath;
+    }
+
+    private function normalizePathForDisplay(string $path): string
+    {
+        return str_replace('\\', '/', $path);
     }
 }

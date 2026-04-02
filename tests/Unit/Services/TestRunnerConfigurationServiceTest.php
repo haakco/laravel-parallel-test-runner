@@ -297,7 +297,37 @@ final class TestRunnerConfigurationServiceTest extends TestCase
 
         $prefix = $service->buildEnvironmentPrefix();
 
-        $this->assertStringContainsString('APP_ENV=testing', $prefix);
+        $this->assertStringContainsString("APP_ENV='testing'", $prefix);
+    }
+
+    public function test_build_environment_prefix_quotes_values_with_spaces_and_special_characters(): void
+    {
+        config()->set('parallel-test-runner.environment', [
+            'APP_NAME' => 'My App',
+            'SPECIAL' => 'value$with!chars',
+        ]);
+
+        $service = new TestRunnerConfigurationService($this->config);
+
+        $prefix = $service->buildEnvironmentPrefix();
+
+        $this->assertStringContainsString("APP_NAME='My App'", $prefix);
+        $this->assertStringContainsString("SPECIAL='value\$with!chars'", $prefix);
+    }
+
+    public function test_build_environment_parts_remain_unescaped_semantic_assignments(): void
+    {
+        config()->set('parallel-test-runner.environment', [
+            'APP_NAME' => 'My App',
+            'SPECIAL' => 'value$with!chars',
+        ]);
+
+        $service = new TestRunnerConfigurationService($this->config);
+
+        $parts = $service->buildEnvironmentParts();
+
+        $this->assertTrue($parts->contains('APP_NAME=My App'));
+        $this->assertTrue($parts->contains('SPECIAL=value$with!chars'));
     }
 
     public function test_get_base_config(): void
