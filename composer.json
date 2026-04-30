@@ -19,16 +19,16 @@
         "source": "https://github.com/haakco/laravel-parallel-test-runner"
     },
     "require": {
-        "php": ">=8.4",
-        "illuminate/console": "^12.0 || ^13.0",
-        "illuminate/support": "^12.0 || ^13.0",
-        "illuminate/database": "^11.0 || ^12.0",
+        "php": "^8.4 || ^8.5",
+        "illuminate/console": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/support": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/database": "^11.0 || ^12.0 || ^13.0",
         "symfony/process": "^7.0 || ^8.0",
         "spatie/laravel-data": "^4.0"
     },
     "require-dev": {
-        "orchestra/testbench": "^10.0",
-        "phpunit/phpunit": "^12.0 || ^13.0",
+        "orchestra/testbench": "^9.0.0 || ^10.0.0 || ^11.0.0",
+        "phpunit/phpunit": "^11.5 || ^12.0 || ^13.0",
         "larastan/larastan": "*",
         "rector/rector": "*",
         "laravel/pint": "^1.0",
