@@ -62,8 +62,26 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
         $workerIds = array_keys($databases);
         $batches = array_chunk($workerIds, $batchSize);
 
-        foreach ($batches as $batch) {
-            $this->provisionBatch($batch, $databases, $context, $maxRetries, $retryDelay);
+        $this->reportProgress(
+            $context,
+            sprintf(
+                'Preparing %d worker %s in batches of %d',
+                $workerCount,
+                $workerCount === 1 ? 'database' : 'databases',
+                $batchSize,
+            ),
+        );
+
+        foreach ($batches as $batchIndex => $batch) {
+            $this->provisionBatch(
+                $batch,
+                $databases,
+                $context,
+                $maxRetries,
+                $retryDelay,
+                $batchIndex + 1,
+                count($batches),
+            );
         }
 
         return $databases;
@@ -97,10 +115,22 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
         ProvisionContext $context,
         int $maxRetries,
         int $retryDelay,
+        int $batchNumber,
+        int $batchCount,
     ): void {
         /** @var array<int, string|null> $failures Map of worker ID to last error */
         $failures = [];
         $pendingWorkers = $workerIds;
+
+        $this->reportProgress(
+            $context,
+            sprintf(
+                'Starting database provision batch %d/%d for workers %s',
+                $batchNumber,
+                $batchCount,
+                implode(', ', $workerIds),
+            ),
+        );
 
         for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
             if ($pendingWorkers === []) {
@@ -116,6 +146,7 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
                 if (! $noRefreshDb) {
                     foreach ($pendingWorkers as $workerId) {
                         $dbName = $databases[$workerId];
+                        $this->reportProgress($context, sprintf('Dropping database %s before retry', $dbName));
                         $this->dropDatabase($dbName);
                     }
                 }
@@ -184,14 +215,19 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
         $noRefreshDb = (bool) ($context->extraOptions['no_refresh_db'] ?? false);
 
         if ($noRefreshDb) {
+            $this->reportProgress($context, sprintf('Checking database %s', $dbName));
             $this->ensureDatabaseExists($dbName, $context);
         } else {
+            $this->reportProgress($context, sprintf('Dropping database %s', $dbName));
             $this->dropDatabase($dbName);
+            $this->reportProgress($context, sprintf('Creating database %s', $dbName));
             $this->createDatabase($dbName);
             $this->migrateFreshDatabase($dbName, $context);
         }
 
+        $this->reportProgress($context, sprintf('Seeding database %s', $dbName));
         $this->seedDatabase($dbName, $context, $workerId);
+        $this->reportProgress($context, sprintf('Finished provisioning database %s', $dbName));
     }
 
     private function createDatabase(string $dbName): void
@@ -231,9 +267,11 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
             DB::reconnect($context->connection);
 
             if ($context->useSchemaLoad) {
+                $this->reportProgress($context, sprintf('Loading schema into %s', $dbName));
                 $this->schemaLoader->loadSchema($context->connection, $dbName);
             }
 
+            $this->reportProgress($context, sprintf('Running migrate:fresh on %s', $dbName));
             $this->runMigrationCommand(
                 'migrate:fresh',
                 [
@@ -281,8 +319,10 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
     private function ensureDatabaseExists(string $dbName, ProvisionContext $context): void
     {
         if ($this->databaseExists($dbName)) {
+            $this->reportProgress($context, sprintf('Applying pending migrations to %s', $dbName));
             $this->ensureMigrationsUpToDate($dbName, $context);
         } else {
+            $this->reportProgress($context, sprintf('Creating database %s', $dbName));
             $this->createDatabase($dbName);
             $this->migrateFreshDatabase($dbName, $context);
         }
@@ -303,6 +343,7 @@ final class ParallelBatchProvisioner implements DatabaseProvisionerInterface
             DB::purge($context->connection);
             DB::reconnect($context->connection);
 
+            $this->reportProgress($context, sprintf('Running migrate on %s', $dbName));
             $this->runMigrationCommand(
                 'migrate',
                 [

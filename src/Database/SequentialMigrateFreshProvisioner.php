@@ -48,6 +48,15 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
 
         $noRefreshDb = (bool) ($context->extraOptions['no_refresh_db'] ?? false);
 
+        $this->reportProgress(
+            $context,
+            sprintf(
+                'Preparing %d worker %s sequentially',
+                $workerCount,
+                $workerCount === 1 ? 'database' : 'databases',
+            ),
+        );
+
         for ($i = 1; $i <= $workerCount; $i++) {
             $dbName = $splitTotal !== null && $splitGroup !== null
                 ? $namingStrategy->forWorkerWithSplit($i, (int) $splitTotal, (int) $splitGroup)
@@ -59,6 +68,7 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
             );
 
             if ($noRefreshDb) {
+                $this->reportProgress($context, sprintf('Checking database %s', $dbName));
                 $this->ensureDatabaseExists($dbName, $context);
             } else {
                 $this->resetDatabase($dbName, $context);
@@ -68,6 +78,7 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
             $this->createdDatabases[] = $dbName;
 
             $this->seedDatabase($dbName, $context);
+            $this->reportProgress($context, sprintf('Finished provisioning database %s', $dbName));
         }
 
         return $databases;
@@ -94,7 +105,9 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
      */
     private function resetDatabase(string $dbName, ProvisionContext $context): void
     {
+        $this->reportProgress($context, sprintf('Dropping database %s', $dbName));
         $this->dropDatabase($dbName);
+        $this->reportProgress($context, sprintf('Creating database %s', $dbName));
         $this->createDatabase($dbName);
         $this->migrateFreshDatabase($dbName, $context);
     }
@@ -156,9 +169,11 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
             DB::reconnect($context->connection);
 
             if ($context->useSchemaLoad) {
+                $this->reportProgress($context, sprintf('Loading schema into %s', $dbName));
                 $this->schemaLoader->loadSchema($context->connection, $dbName);
             }
 
+            $this->reportProgress($context, sprintf('Running migrate:fresh on %s', $dbName));
             $this->runMigrationCommand(
                 'migrate:fresh',
                 [
@@ -181,6 +196,8 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
     private function seedDatabase(string $dbName, ProvisionContext $context): void
     {
         $workerId = (int) array_search($dbName, $this->createdDatabases, true) + 1;
+
+        $this->reportProgress($context, sprintf('Seeding database %s', $dbName));
 
         $seedContext = new SeedContext(
             connection: $context->connection,
@@ -211,8 +228,10 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
     private function ensureDatabaseExists(string $dbName, ProvisionContext $context): void
     {
         if ($this->databaseExists($dbName)) {
+            $this->reportProgress($context, sprintf('Applying pending migrations to %s', $dbName));
             $this->ensureMigrationsUpToDate($dbName, $context);
         } else {
+            $this->reportProgress($context, sprintf('Creating database %s', $dbName));
             $this->createDatabase($dbName);
             $this->migrateFreshDatabase($dbName, $context);
         }
@@ -233,6 +252,7 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
             DB::purge($context->connection);
             DB::reconnect($context->connection);
 
+            $this->reportProgress($context, sprintf('Running migrate on %s', $dbName));
             $this->runMigrationCommand(
                 'migrate',
                 [
