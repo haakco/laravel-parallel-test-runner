@@ -59,6 +59,10 @@ final class DatabaseNamingStrategyTest extends TestCase
 
     public function test_from_config_uses_defaults(): void
     {
+        config()->set('parallel-test-runner.database.base_name', 'app_test');
+        config()->set('parallel-test-runner.db_naming.pattern', '{base}_w{worker}');
+        config()->set('parallel-test-runner.db_naming.split_pattern', '{base}_s{total}g{group}_w{worker}');
+
         $strategy = DatabaseNamingStrategy::fromConfig();
 
         $this->assertSame('app_test_w1', $strategy->forWorker(1));

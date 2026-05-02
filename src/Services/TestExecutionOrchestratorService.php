@@ -19,6 +19,7 @@ use Haakco\ParallelTestRunner\Sections\SectionResolutionWorkflow;
 use Illuminate\Console\OutputStyle;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
@@ -190,7 +191,8 @@ class TestExecutionOrchestratorService
         }
 
         $logDir = $options->logDirectory ?? base_path('test-logs/' . sprintf('%s_%s', date('Ymd_His_u'), bin2hex(random_bytes(3))));
-        if (! is_dir($logDir) && ! @mkdir($logDir, 0755, true) && ! is_dir($logDir)) {
+        $createdLogDir = ! is_dir($logDir);
+        if ($createdLogDir && ! @mkdir($logDir, 0755, true) && ! is_dir($logDir)) {
             throw new \RuntimeException(sprintf('Unable to create test log directory [%s].', $logDir));
         }
 
@@ -205,14 +207,24 @@ class TestExecutionOrchestratorService
 
         $commandParts[] = '--log-dir=' . escapeshellarg($logDir);
         $commandString = implode(' ', $commandParts);
+        $environmentPrefix = $this->buildBackgroundEnvironmentPrefix($options);
 
         $fullCommand = sprintf(
-            'cd %s && nohup env APP_ENV=testing %s > %s/runner.log 2>&1 & echo $!',
+            'cd %s && nohup env %s %s > %s/runner.log 2>&1 & echo $!',
             escapeshellarg(base_path()),
+            $environmentPrefix,
             $commandString,
             escapeshellarg($logDir),
         );
-        $pid = (int) shell_exec($fullCommand);
+        $pid = $this->resolveBackgroundProcessId(shell_exec($fullCommand));
+
+        if ($pid === null) {
+            if ($createdLogDir) {
+                File::deleteDirectory($logDir);
+            }
+
+            return BackgroundRunStartResultData::failure('Unable to start background test run');
+        }
 
         file_put_contents($pidFile, (string) $pid);
 
@@ -223,6 +235,42 @@ class TestExecutionOrchestratorService
         file_put_contents($lockFile, $logDir);
 
         return BackgroundRunStartResultData::success($pid, $logDir);
+    }
+
+    private function buildBackgroundEnvironmentPrefix(TestRunOptionsData $options): string
+    {
+        $environment = $this->config->getProcessEnvironment()->all();
+
+        if ($options->debug) {
+            $environment['DEBUG'] = '1';
+        }
+
+        if ($options->debugNative) {
+            $environment['USE_ZEND_ALLOC'] = '0';
+            $environment['NATIVE_DEBUG'] = '1';
+        }
+
+        if ($options->ignoreLock) {
+            $environment['TEST_IGNORE_MIGRATION_LOCK'] = '1';
+        }
+
+        return collect($environment)
+            ->map(static fn(string $value, string $key): string => sprintf('%s=%s', $key, escapeshellarg($value)))
+            ->values()
+            ->implode(' ');
+    }
+
+    private function resolveBackgroundProcessId(string|false|null $pidOutput): ?int
+    {
+        if (! is_string($pidOutput)) {
+            return null;
+        }
+
+        $pid = filter_var(trim($pidOutput), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+
+        return $pid === false ? null : (int) $pid;
     }
 
     private function runInternal(string $logDirectory): bool
@@ -422,6 +470,7 @@ class TestExecutionOrchestratorService
                 command: (string) config('parallel-test-runner.commands.main', 'test:run-sections'),
                 summaryFile: $logDirectory . '/00_SUMMARY.txt',
                 extraOptions: [
+                    'command_args' => $this->buildReportCommandArgs(),
                     'run_started_at' => date(DATE_ATOM, (int) $runStartedAt),
                     'run_finished_at' => date(DATE_ATOM, (int) $runFinishedAt),
                     'run_duration_seconds' => round($runDurationSeconds, 6),
@@ -440,5 +489,31 @@ class TestExecutionOrchestratorService
                 'error' => $exception->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildReportCommandArgs(): array
+    {
+        $arguments = [
+            '--parallel=' . $this->config->parallelProcesses,
+        ];
+
+        if ($this->config->failFast) {
+            $arguments[] = '--fail-fast';
+        }
+
+        $filter = $this->config->options['filter'] ?? null;
+        if (is_string($filter) && $filter !== '') {
+            $arguments[] = '--filter=' . $filter;
+        }
+
+        $testSuite = $this->config->options['testsuite'] ?? null;
+        if (is_string($testSuite) && $testSuite !== '') {
+            $arguments[] = '--testsuite=' . $testSuite;
+        }
+
+        return $arguments;
     }
 }

@@ -11,11 +11,31 @@ final class ReportFormatter
      */
     public function relativePath(string $path): string
     {
-        $base = base_path() . DIRECTORY_SEPARATOR;
+        $basePath = base_path();
+        $resolvedPath = realpath($path);
+        $resolvedBasePath = realpath($basePath);
 
-        return str_starts_with($path, $base)
-            ? substr($path, strlen($base))
-            : $path;
+        if ($resolvedPath !== false) {
+            $path = $resolvedPath;
+        }
+
+        if ($resolvedBasePath !== false) {
+            $basePath = $resolvedBasePath;
+        }
+
+        $normalizedPath = $this->normalizePath($path);
+        $normalizedBasePath = $this->normalizePath($basePath);
+        $basePrefix = rtrim($normalizedBasePath, '/') . '/';
+
+        if ($normalizedPath === rtrim($normalizedBasePath, '/')) {
+            return '.';
+        }
+
+        if (str_starts_with($normalizedPath, $basePrefix)) {
+            return ltrim(substr($normalizedPath, strlen($basePrefix)), '/');
+        }
+
+        return $normalizedPath;
     }
 
     /**
@@ -40,5 +60,10 @@ final class ReportFormatter
         }
 
         return sprintf('%.2fs', $remaining);
+    }
+
+    private function normalizePath(string $path): string
+    {
+        return str_replace('\\', '/', $path);
     }
 }

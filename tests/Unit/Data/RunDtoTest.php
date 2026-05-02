@@ -17,6 +17,7 @@ use Haakco\ParallelTestRunner\Data\SectionStatusData;
 use Haakco\ParallelTestRunner\Data\SlowestSectionData;
 use Haakco\ParallelTestRunner\Data\TestEtaData;
 use Haakco\ParallelTestRunner\Data\TestProgressData;
+use Haakco\ParallelTestRunner\Data\TestProgressSummaryData;
 use Haakco\ParallelTestRunner\Data\TestRunnerStateData;
 use Haakco\ParallelTestRunner\Data\TestRunReportContextData;
 use Haakco\ParallelTestRunner\Tests\TestCase;
@@ -242,6 +243,36 @@ final class RunDtoTest extends TestCase
         );
 
         $this->assertSame(50.0, $progress->percentage);
+    }
+
+    public function test_progress_summary_data(): void
+    {
+        $progress = new TestProgressData(
+            completed: 3,
+            total: 8,
+            percentage: 37.5,
+            elapsedSeconds: 12.0,
+            estimatedRemainingSeconds: 20.0,
+        );
+
+        $summary = new TestProgressSummaryData(
+            progress: $progress,
+            sectionStatuses: [
+                new SectionStatusData(
+                    name: 'Unit/Models',
+                    status: 'running',
+                    duration: 1.5,
+                    exitCode: null,
+                ),
+            ],
+            passedSections: 2,
+            failedSections: 1,
+        );
+
+        $this->assertSame(3, $summary->progress->completed);
+        $this->assertCount(1, $summary->sectionStatuses);
+        $this->assertSame(2, $summary->passedSections);
+        $this->assertSame(1, $summary->failedSections);
     }
 
     public function test_eta_data(): void
