@@ -64,54 +64,38 @@ class TestCommand extends Command
     {
         $options = [];
 
-        if ($this->option('list')) {
-            $options['--list'] = true;
-        }
+        foreach ($this->forwardOptionRules() as $rule) {
+            $value = $this->option($rule['name']);
 
-        /** @var array<int, string> $sections */
-        $sections = $this->option('section');
-        if ($sections !== []) {
-            $options['--section'] = $sections;
-        }
-
-        if ($this->option('individual')) {
-            $options['--individual'] = true;
-        }
-
-        /** @var string $parallel */
-        $parallel = $this->option('parallel');
-        if ($parallel !== '1') {
-            $options['--parallel'] = $parallel;
-        }
-
-        if ($this->option('split-total') !== null) {
-            $options['--split-total'] = $this->option('split-total');
-        }
-
-        if ($this->option('split-group') !== null) {
-            $options['--split-group'] = $this->option('split-group');
-        }
-
-        if ($this->option('fail-fast')) {
-            $options['--fail-fast'] = true;
-        }
-
-        /** @var string $timeout */
-        $timeout = $this->option('timeout');
-        if ($timeout !== '600') {
-            $options['--timeout'] = $timeout;
-        }
-
-        if ($this->option('debug')) {
-            $options['--debug'] = true;
-        }
-
-        /** @var string $emitMetrics */
-        $emitMetrics = $this->option('emit-metrics');
-        if ($emitMetrics !== '1') {
-            $options['--emit-metrics'] = $emitMetrics;
+            if ($this->shouldForwardOption($value, $rule['default'])) {
+                $options[$rule['target']] = $rule['flag'] ? true : $value;
+            }
         }
 
         return $options;
+    }
+
+    /**
+     * @return list<array{name: string, target: string, default: mixed, flag: bool}>
+     */
+    private function forwardOptionRules(): array
+    {
+        return [
+            ['name' => 'list', 'target' => '--list', 'default' => false, 'flag' => true],
+            ['name' => 'section', 'target' => '--section', 'default' => [], 'flag' => false],
+            ['name' => 'individual', 'target' => '--individual', 'default' => false, 'flag' => true],
+            ['name' => 'parallel', 'target' => '--parallel', 'default' => '1', 'flag' => false],
+            ['name' => 'split-total', 'target' => '--split-total', 'default' => null, 'flag' => false],
+            ['name' => 'split-group', 'target' => '--split-group', 'default' => null, 'flag' => false],
+            ['name' => 'fail-fast', 'target' => '--fail-fast', 'default' => false, 'flag' => true],
+            ['name' => 'timeout', 'target' => '--timeout', 'default' => '600', 'flag' => false],
+            ['name' => 'debug', 'target' => '--debug', 'default' => false, 'flag' => true],
+            ['name' => 'emit-metrics', 'target' => '--emit-metrics', 'default' => '1', 'flag' => false],
+        ];
+    }
+
+    private function shouldForwardOption(mixed $value, mixed $default): bool
+    {
+        return $value !== $default;
     }
 }

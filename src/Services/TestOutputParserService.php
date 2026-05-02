@@ -19,127 +19,103 @@ final class TestOutputParserService
             return $this->emptyResult();
         }
 
-        $tests = 0;
-        $assertions = 0;
-        $errors = 0;
-        $failures = 0;
-        $skipped = 0;
-        $incomplete = 0;
-        $risky = 0;
-        $warnings = 0;
-        $duration = 0.0;
-        $success = true;
+        foreach ($this->lineParsers() as $parser) {
+            $result = $parser($cleanLine);
 
-        // Parse PHPUnit dot progress output (lines containing only dots and status letters)
-        if (preg_match('/^[.EFSIRW]+$/', trim($cleanLine))) {
-            $errors = substr_count($cleanLine, 'E');
-            $failures = substr_count($cleanLine, 'F');
-            $skipped = substr_count($cleanLine, 'S');
-            $incomplete = substr_count($cleanLine, 'I');
-            $risky = substr_count($cleanLine, 'R');
-            $warnings = substr_count($cleanLine, 'W');
-
-            $dots = substr_count($cleanLine, '.');
-            $tests = $dots + $errors + $failures + $skipped + $incomplete + $risky + $warnings;
-            $success = $errors === 0 && $failures === 0;
-
-            return new ParsedTestOutputData(
-                tests: $tests,
-                assertions: 0,
-                errors: $errors,
-                failures: $failures,
-                skipped: $skipped,
-                incomplete: $incomplete,
-                risky: $risky,
-                warnings: $warnings,
-                duration: 0.0,
-                success: $success,
-            );
-        }
-
-        // Parse "OK (N tests, N assertions)" format
-        if (preg_match('/OK\s*\((\d+)\s+tests?,\s*(\d+)\s+assertions?\)/', $cleanLine, $matches)) {
-            $tests = (int) $matches[1];
-            $assertions = (int) $matches[2];
-
-            return new ParsedTestOutputData(
-                tests: $tests,
-                assertions: $assertions,
-                errors: 0,
-                failures: 0,
-                skipped: 0,
-                incomplete: 0,
-                risky: 0,
-                warnings: 0,
-                duration: 0.0,
-                success: true,
-            );
-        }
-
-        // Parse "Tests: N, Assertions: N" summary line with optional counters
-        if (preg_match('/Tests:\s*(\d+),\s*Assertions:\s*(\d+)/', $cleanLine, $matches)) {
-            $tests = (int) $matches[1];
-            $assertions = (int) $matches[2];
-
-            if (preg_match('/Errors:\s*(\d+)/', $cleanLine, $m)) {
-                $errors = (int) $m[1];
+            if ($result !== null) {
+                return $result;
             }
-
-            if (preg_match('/Failures:\s*(\d+)/', $cleanLine, $m)) {
-                $failures = (int) $m[1];
-            }
-
-            if (preg_match('/Skipped:\s*(\d+)/', $cleanLine, $m)) {
-                $skipped = (int) $m[1];
-            }
-
-            if (preg_match('/Incomplete:\s*(\d+)/', $cleanLine, $m)) {
-                $incomplete = (int) $m[1];
-            }
-
-            if (preg_match('/Risky:\s*(\d+)/', $cleanLine, $m)) {
-                $risky = (int) $m[1];
-            }
-
-            if (preg_match('/Warnings:\s*(\d+)/', $cleanLine, $m)) {
-                $warnings = (int) $m[1];
-            }
-
-            $success = $errors === 0 && $failures === 0;
-
-            return new ParsedTestOutputData(
-                tests: $tests,
-                assertions: $assertions,
-                errors: $errors,
-                failures: $failures,
-                skipped: $skipped,
-                incomplete: $incomplete,
-                risky: $risky,
-                warnings: $warnings,
-                duration: 0.0,
-                success: $success,
-            );
-        }
-
-        // Parse "Time: MM:SS.mmm" or "Time: N.NNs"
-        if (preg_match('/Time:\s*(\d+):(\d+)\.(\d+)/', $cleanLine, $matches)) {
-            $duration = ((int) $matches[1]) * 60.0 + (int) $matches[2] + (int) $matches[3] / 1000.0;
-
-            return new ParsedTestOutputData(
-                tests: 0,
-                assertions: 0,
-                errors: 0,
-                failures: 0,
-                skipped: 0,
-                incomplete: 0,
-                risky: 0,
-                warnings: 0,
-                duration: $duration,
-                success: true,
-            );
         }
 
         return $this->emptyResult();
+    }
+
+    /**
+     * @return list<callable(string): ?ParsedTestOutputData>
+     */
+    private function lineParsers(): array
+    {
+        return [
+            $this->parseProgressDots(...),
+            $this->parseOkSummary(...),
+            $this->parseTestSummary(...),
+            $this->parseDuration(...),
+        ];
+    }
+
+    private function parseProgressDots(string $line): ?ParsedTestOutputData
+    {
+        if (! preg_match('/^[.EFSIRW]+$/', trim($line))) {
+            return null;
+        }
+
+        $errors = substr_count($line, 'E');
+        $failures = substr_count($line, 'F');
+        $skipped = substr_count($line, 'S');
+        $incomplete = substr_count($line, 'I');
+        $risky = substr_count($line, 'R');
+        $warnings = substr_count($line, 'W');
+        $tests = substr_count($line, '.') + $errors + $failures + $skipped + $incomplete + $risky + $warnings;
+
+        return $this->parsedResult(
+            tests: $tests,
+            errors: $errors,
+            failures: $failures,
+            skipped: $skipped,
+            incomplete: $incomplete,
+            risky: $risky,
+            warnings: $warnings,
+        );
+    }
+
+    private function parseOkSummary(string $line): ?ParsedTestOutputData
+    {
+        if (! preg_match('/OK\s*\((\d+)\s+tests?,\s*(\d+)\s+assertions?\)/', $line, $matches)) {
+            return null;
+        }
+
+        return $this->parsedResult(
+            tests: (int) $matches[1],
+            assertions: (int) $matches[2],
+        );
+    }
+
+    private function parseTestSummary(string $line): ?ParsedTestOutputData
+    {
+        if (! preg_match('/Tests:\s*(\d+),\s*Assertions:\s*(\d+)/', $line, $matches)) {
+            return null;
+        }
+
+        return $this->parsedResult(
+            tests: (int) $matches[1],
+            assertions: (int) $matches[2],
+            errors: $this->extractCounter($line, 'Errors'),
+            failures: $this->extractCounter($line, 'Failures'),
+            skipped: $this->extractCounter($line, 'Skipped'),
+            incomplete: $this->extractCounter($line, 'Incomplete'),
+            risky: $this->extractCounter($line, 'Risky'),
+            warnings: $this->extractCounter($line, 'Warnings'),
+        );
+    }
+
+    private function parseDuration(string $line): ?ParsedTestOutputData
+    {
+        if (! preg_match('/Time:\s*(\d+):(\d+)\.(\d+)/', $line, $matches)) {
+            return null;
+        }
+
+        return $this->parsedResult(
+            duration: ((int) $matches[1]) * 60.0 + (int) $matches[2] + (int) $matches[3] / 1000.0,
+        );
+    }
+
+    private function extractCounter(string $line, string $label): int
+    {
+        if (! preg_match("/{$label}:\s*(\d+)/", $line, $matches)) {
+            return 0;
+        }
+
+        return (int) $matches[1];
     }
 
     /**
@@ -234,19 +210,33 @@ final class TestOutputParserService
         return trim((string) preg_replace('/\x1B\[[0-9;]*m/', '', $text));
     }
 
+    private function parsedResult(
+        int $tests = 0,
+        int $assertions = 0,
+        int $errors = 0,
+        int $failures = 0,
+        int $skipped = 0,
+        int $incomplete = 0,
+        int $risky = 0,
+        int $warnings = 0,
+        float $duration = 0.0,
+    ): ParsedTestOutputData {
+        return new ParsedTestOutputData(
+            tests: $tests,
+            assertions: $assertions,
+            errors: $errors,
+            failures: $failures,
+            skipped: $skipped,
+            incomplete: $incomplete,
+            risky: $risky,
+            warnings: $warnings,
+            duration: $duration,
+            success: $errors === 0 && $failures === 0,
+        );
+    }
+
     private function emptyResult(): ParsedTestOutputData
     {
-        return new ParsedTestOutputData(
-            tests: 0,
-            assertions: 0,
-            errors: 0,
-            failures: 0,
-            skipped: 0,
-            incomplete: 0,
-            risky: 0,
-            warnings: 0,
-            duration: 0.0,
-            success: true,
-        );
+        return $this->parsedResult();
     }
 }

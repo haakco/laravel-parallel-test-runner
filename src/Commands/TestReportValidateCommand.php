@@ -23,7 +23,7 @@ class TestReportValidateCommand extends Command
     {
         $reportPath = $this->resolveReportPath();
 
-        if ($reportPath === null || ! File::exists($reportPath)) {
+        if (! $this->reportExists($reportPath)) {
             $this->error('Report file not found: ' . ($reportPath ?? 'no path provided'));
 
             return self::FAILURE;
@@ -32,14 +32,13 @@ class TestReportValidateCommand extends Command
         $schemaVersion = (string) $this->option('schema');
         $schemaPath = $this->resolveSchemaPath($schemaVersion);
 
-        if (! File::exists($schemaPath)) {
+        if (! $this->schemaExists($schemaPath, $schemaVersion)) {
             $this->error("Schema not found for version: {$schemaVersion}");
 
             return self::FAILURE;
         }
 
-        $reportContent = File::get($reportPath);
-        $reportData = json_decode($reportContent);
+        $reportData = $this->decodeJsonFile($reportPath);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
             $this->error('Invalid JSON: ' . json_last_error_msg());
@@ -47,14 +46,11 @@ class TestReportValidateCommand extends Command
             return self::FAILURE;
         }
 
-        $schemaContent = File::get($schemaPath);
-        $schema = json_decode($schemaContent);
+        $schema = $this->decodeJsonFile($schemaPath);
 
         $errors = $this->validateAgainstSchema($reportData, $schema);
 
-        if ($this->option('strict-artifacts') && $errors === []) {
-            $errors = array_merge($errors, $this->validateArtifactPaths($reportData, dirname($reportPath)));
-        }
+        $errors = $this->validateStrictArtifacts($reportData, $reportPath, $errors);
 
         if ($errors !== []) {
             $this->error('Validation FAILED with ' . count($errors) . ' error(s):');
@@ -76,6 +72,21 @@ class TestReportValidateCommand extends Command
         return self::SUCCESS;
     }
 
+    private function reportExists(?string $path): bool
+    {
+        return $path !== null && File::exists($path);
+    }
+
+    private function schemaExists(string $path, string $version): bool
+    {
+        return $version !== '' && File::exists($path);
+    }
+
+    private function decodeJsonFile(string $path): mixed
+    {
+        return json_decode(File::get($path));
+    }
+
     private function resolveReportPath(): ?string
     {
         /** @var string|null $path */
@@ -94,40 +105,72 @@ class TestReportValidateCommand extends Command
      */
     private function validateAgainstSchema(mixed $data, object $schema): array
     {
-        $errors = [];
-
         if (! is_object($data)) {
             return ['Report must be a JSON object'];
         }
 
-        // Check required properties
-        if (isset($schema->required) && is_array($schema->required)) {
-            foreach ($schema->required as $required) {
-                if (! property_exists($data, $required)) {
-                    $errors[] = "Missing required property: {$required}";
-                }
+        return array_merge(
+            $this->validateRequiredProperties($data, $schema),
+            $this->validateDefinedProperties($data, $schema),
+            $this->validateAdditionalProperties($data, $schema),
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateRequiredProperties(object $data, object $schema): array
+    {
+        if (! isset($schema->required) || ! is_array($schema->required)) {
+            return [];
+        }
+
+        $errors = [];
+
+        foreach ($schema->required as $required) {
+            if (! property_exists($data, $required)) {
+                $errors[] = "Missing required property: {$required}";
             }
         }
 
-        // Check property types
-        if (isset($schema->properties) && is_object($schema->properties)) {
-            foreach ($schema->properties as $propName => $propSchema) {
-                if (! property_exists($data, $propName)) {
-                    continue;
-                }
+        return $errors;
+    }
 
-                $propErrors = $this->validateProperty($data->{$propName}, $propSchema, $propName);
-                $errors = array_merge($errors, $propErrors);
+    /**
+     * @return list<string>
+     */
+    private function validateDefinedProperties(object $data, object $schema): array
+    {
+        if (! isset($schema->properties) || ! is_object($schema->properties)) {
+            return [];
+        }
+
+        $errors = [];
+
+        foreach ($schema->properties as $propName => $propSchema) {
+            if (property_exists($data, $propName)) {
+                $errors = array_merge($errors, $this->validateProperty($data->{$propName}, $propSchema, $propName));
             }
         }
 
-        // Check additionalProperties
-        if (isset($schema->additionalProperties) && $schema->additionalProperties === false) {
-            $allowedProps = isset($schema->properties) ? array_keys((array) $schema->properties) : [];
-            foreach (array_keys((array) $data) as $key) {
-                if (! in_array($key, $allowedProps, true)) {
-                    $errors[] = "Unexpected property: {$key}";
-                }
+        return $errors;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateAdditionalProperties(object $data, object $schema): array
+    {
+        if (! isset($schema->additionalProperties) || $schema->additionalProperties !== false) {
+            return [];
+        }
+
+        $allowedProps = isset($schema->properties) ? array_keys((array) $schema->properties) : [];
+        $errors = [];
+
+        foreach (array_keys((array) $data) as $key) {
+            if (! in_array($key, $allowedProps, true)) {
+                $errors[] = "Unexpected property: {$key}";
             }
         }
 
@@ -139,70 +182,136 @@ class TestReportValidateCommand extends Command
      */
     private function validateProperty(mixed $value, object $schema, string $path): array
     {
+        return array_merge(
+            $this->validateConst($value, $schema, $path),
+            $this->validateType($value, $schema, $path),
+            $this->validateAnyOf($value, $schema, $path),
+            $this->validateMinLength($value, $schema, $path),
+            $this->validateMinimum($value, $schema, $path),
+            $this->validateEnum($value, $schema, $path),
+            $this->validateNestedObject($value, $schema, $path),
+            $this->validateArrayItems($value, $schema, $path),
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateConst(mixed $value, object $schema, string $path): array
+    {
+        if (! isset($schema->const) || $value === $schema->const) {
+            return [];
+        }
+
+        $actual = is_scalar($value) ? (string) $value : gettype($value);
+
+        return ["{$path}: expected constant value '{$schema->const}', got '{$actual}'"];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateType(mixed $value, object $schema, string $path): array
+    {
+        if (! isset($schema->type) || $this->checkType($value, $schema->type)) {
+            return [];
+        }
+
+        $expectedType = is_array($schema->type) ? implode('|', $schema->type) : $schema->type;
+
+        return ["{$path}: expected type '{$expectedType}', got '" . gettype($value) . "'"];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateAnyOf(mixed $value, object $schema, string $path): array
+    {
+        if (! isset($schema->anyOf) || ! is_array($schema->anyOf)) {
+            return [];
+        }
+
+        foreach ($schema->anyOf as $subSchema) {
+            if ($this->validateProperty($value, $subSchema, $path) === []) {
+                return [];
+            }
+        }
+
+        return ["{$path}: value does not match any of the allowed schemas"];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateMinLength(mixed $value, object $schema, string $path): array
+    {
+        if (! isset($schema->minLength) || ! is_string($value) || mb_strlen($value) >= $schema->minLength) {
+            return [];
+        }
+
+        return ["{$path}: string length must be at least {$schema->minLength}"];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateMinimum(mixed $value, object $schema, string $path): array
+    {
+        if (! isset($schema->minimum) || ! is_numeric($value) || $value >= $schema->minimum) {
+            return [];
+        }
+
+        return ["{$path}: value must be >= {$schema->minimum}"];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateEnum(mixed $value, object $schema, string $path): array
+    {
+        if (! isset($schema->enum) || ! is_array($schema->enum) || in_array($value, $schema->enum, true)) {
+            return [];
+        }
+
+        return ["{$path}: value must be one of [" . implode(', ', $schema->enum) . ']'];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateNestedObject(mixed $value, object $schema, string $path): array
+    {
+        if (! $this->propertyTypeIs($schema, 'object') || ! is_object($value)) {
+            return [];
+        }
+
+        return array_map(
+            static fn(string $nestedError): string => "{$path}.{$nestedError}",
+            $this->validateAgainstSchema($value, $schema),
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateArrayItems(mixed $value, object $schema, string $path): array
+    {
+        if (! $this->propertyTypeIs($schema, 'array') || ! is_array($value) || ! isset($schema->items)) {
+            return [];
+        }
+
         $errors = [];
 
-        // Handle const
-        if (isset($schema->const) && $value !== $schema->const) {
-            $errors[] = "{$path}: expected constant value '{$schema->const}', got '" . (is_scalar($value) ? (string) $value : gettype($value)) . "'";
-        }
-
-        // Handle type checking
-        if (isset($schema->type)) {
-            $typeValid = $this->checkType($value, $schema->type);
-            if (! $typeValid) {
-                $expectedType = is_array($schema->type) ? implode('|', $schema->type) : $schema->type;
-                $errors[] = "{$path}: expected type '{$expectedType}', got '" . gettype($value) . "'";
-            }
-        }
-
-        // Handle anyOf
-        if (isset($schema->anyOf) && is_array($schema->anyOf)) {
-            $anyValid = false;
-            foreach ($schema->anyOf as $subSchema) {
-                $subErrors = $this->validateProperty($value, $subSchema, $path);
-                if ($subErrors === []) {
-                    $anyValid = true;
-
-                    break;
-                }
-            }
-            if (! $anyValid) {
-                $errors[] = "{$path}: value does not match any of the allowed schemas";
-            }
-        }
-
-        // Handle minLength for strings
-        if (isset($schema->minLength) && is_string($value) && mb_strlen($value) < $schema->minLength) {
-            $errors[] = "{$path}: string length must be at least {$schema->minLength}";
-        }
-
-        // Handle minimum for numbers
-        if (isset($schema->minimum) && is_numeric($value) && $value < $schema->minimum) {
-            $errors[] = "{$path}: value must be >= {$schema->minimum}";
-        }
-
-        // Handle enum
-        if (isset($schema->enum) && is_array($schema->enum) && ! in_array($value, $schema->enum, true)) {
-            $errors[] = "{$path}: value must be one of [" . implode(', ', $schema->enum) . ']';
-        }
-
-        // Handle nested objects
-        if (isset($schema->type) && $schema->type === 'object' && is_object($value)) {
-            $nested = $this->validateAgainstSchema($value, $schema);
-            foreach ($nested as $nestedError) {
-                $errors[] = "{$path}.{$nestedError}";
-            }
-        }
-
-        // Handle arrays
-        if (isset($schema->type) && $schema->type === 'array' && is_array($value) && isset($schema->items)) {
-            foreach ($value as $i => $item) {
-                $itemErrors = $this->validateProperty($item, $schema->items, "{$path}[{$i}]");
-                $errors = array_merge($errors, $itemErrors);
-            }
+        foreach ($value as $i => $item) {
+            $errors = array_merge($errors, $this->validateProperty($item, $schema->items, "{$path}[{$i}]"));
         }
 
         return $errors;
+    }
+
+    private function propertyTypeIs(object $schema, string $type): bool
+    {
+        return isset($schema->type) && $schema->type === $type;
     }
 
     /**
@@ -237,27 +346,70 @@ class TestReportValidateCommand extends Command
      */
     private function validateArtifactPaths(object $data, string $basePath): array
     {
-        $errors = [];
+        return array_merge(
+            $this->validateRunArtifactPath($data, $basePath),
+            $this->validateWorkerArtifactPaths($data, $basePath),
+        );
+    }
 
-        if (isset($data->artifacts) && is_object($data->artifacts) && isset($data->artifacts->log_directory)) {
-            $logDir = $this->resolvePath((string) $data->artifacts->log_directory, $basePath);
-            if (! is_dir($logDir)) {
-                $errors[] = "Artifact path does not exist: {$data->artifacts->log_directory}";
-            }
+    /**
+     * @param list<string> $errors
+     * @return list<string>
+     */
+    private function validateStrictArtifacts(mixed $reportData, string $reportPath, array $errors): array
+    {
+        if (! $this->option('strict-artifacts') || $errors !== [] || ! is_object($reportData)) {
+            return $errors;
         }
 
-        if (isset($data->workers) && is_array($data->workers)) {
-            foreach ($data->workers as $i => $worker) {
-                if (isset($worker->artifacts->log_directory)) {
-                    $logDir = $this->resolvePath((string) $worker->artifacts->log_directory, $basePath);
-                    if (! is_dir($logDir)) {
-                        $errors[] = "Worker {$i} artifact path does not exist: {$worker->artifacts->log_directory}";
-                    }
-                }
-            }
+        return array_merge($errors, $this->validateArtifactPaths($reportData, dirname($reportPath)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateRunArtifactPath(object $data, string $basePath): array
+    {
+        if (! isset($data->artifacts) || ! is_object($data->artifacts) || ! isset($data->artifacts->log_directory)) {
+            return [];
+        }
+
+        $logDir = $this->resolvePath((string) $data->artifacts->log_directory, $basePath);
+
+        return is_dir($logDir) ? [] : ["Artifact path does not exist: {$data->artifacts->log_directory}"];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateWorkerArtifactPaths(object $data, string $basePath): array
+    {
+        if (! isset($data->workers) || ! is_array($data->workers)) {
+            return [];
+        }
+
+        $errors = [];
+
+        foreach ($data->workers as $i => $worker) {
+            $errors = array_merge($errors, $this->validateWorkerArtifactPath($worker, $basePath, $i));
         }
 
         return $errors;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function validateWorkerArtifactPath(mixed $worker, string $basePath, int $index): array
+    {
+        if (! isset($worker->artifacts->log_directory)) {
+            return [];
+        }
+
+        $logDirectory = (string) $worker->artifacts->log_directory;
+        $logDir = $this->resolvePath($logDirectory, $basePath);
+
+        return is_dir($logDir) ? [] : ["Worker {$index} artifact path does not exist: {$logDirectory}"];
     }
 
     private function resolvePath(string $path, string $basePath): string

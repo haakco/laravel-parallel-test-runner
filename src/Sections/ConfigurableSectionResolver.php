@@ -194,59 +194,148 @@ final class ConfigurableSectionResolver implements SectionResolverInterface
 
         foreach ($tokens as $token) {
             if (is_array($token)) {
-                $tokenId = $token[0];
-
-                if (in_array($tokenId, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_OPEN_TAG], true)) {
-                    continue;
-                }
-
-                if ($tokenId === T_ABSTRACT && $classBraceDepths === []) {
-                    $pendingAbstract = true;
-                    $previousMeaningfulToken = $tokenId;
-
-                    continue;
-                }
-
-                if ($tokenId === T_CLASS && $previousMeaningfulToken !== T_NEW && $previousMeaningfulToken !== '::') {
-                    $waitingForClassBody = true;
-                    $pendingTopLevelClassIsAbstract = $pendingAbstract && $classBraceDepths === [];
-                    $pendingAbstract = false;
-                    $previousMeaningfulToken = $tokenId;
-
-                    continue;
-                }
-
-                $pendingAbstract = false;
-                $previousMeaningfulToken = $tokenId;
+                $this->readPhpToken(
+                    $token[0],
+                    $classBraceDepths,
+                    $pendingAbstract,
+                    $waitingForClassBody,
+                    $pendingTopLevelClassIsAbstract,
+                    $previousMeaningfulToken,
+                );
 
                 continue;
             }
 
-            if ($token === '{') {
-                $braceDepth++;
-
-                if ($waitingForClassBody) {
-                    $classBraceDepths[] = $braceDepth;
-                    $topLevelClassAbstractStates[] = $pendingTopLevelClassIsAbstract;
-                    $waitingForClassBody = false;
-                    $pendingTopLevelClassIsAbstract = false;
-                }
-            } elseif ($token === '}') {
-                if ($classBraceDepths !== [] && end($classBraceDepths) === $braceDepth) {
-                    array_pop($classBraceDepths);
-                }
-
-                $braceDepth = max(0, $braceDepth - 1);
-            }
-
-            if (trim($token) !== '') {
-                $pendingAbstract = false;
-                $previousMeaningfulToken = $token;
-            }
+            $this->readPhpSyntaxToken(
+                $token,
+                $braceDepth,
+                $classBraceDepths,
+                $pendingAbstract,
+                $waitingForClassBody,
+                $pendingTopLevelClassIsAbstract,
+                $topLevelClassAbstractStates,
+                $previousMeaningfulToken,
+            );
         }
 
         return $topLevelClassAbstractStates !== []
             && ! in_array(false, $topLevelClassAbstractStates, true);
+    }
+
+    /**
+     * @param list<int> $classBraceDepths
+     */
+    private function readPhpToken(
+        int $tokenId,
+        array $classBraceDepths,
+        bool &$pendingAbstract,
+        bool &$waitingForClassBody,
+        bool &$pendingTopLevelClassIsAbstract,
+        int|string|null &$previousMeaningfulToken,
+    ): void {
+        if ($this->isIgnoredPhpToken($tokenId)) {
+            return;
+        }
+
+        if ($tokenId === T_ABSTRACT && $classBraceDepths === []) {
+            $pendingAbstract = true;
+            $previousMeaningfulToken = $tokenId;
+
+            return;
+        }
+
+        if ($this->isClassDeclarationToken($tokenId, $previousMeaningfulToken)) {
+            $waitingForClassBody = true;
+            $pendingTopLevelClassIsAbstract = $pendingAbstract && $classBraceDepths === [];
+            $pendingAbstract = false;
+            $previousMeaningfulToken = $tokenId;
+
+            return;
+        }
+
+        $pendingAbstract = false;
+        $previousMeaningfulToken = $tokenId;
+    }
+
+    private function isIgnoredPhpToken(int $tokenId): bool
+    {
+        return in_array($tokenId, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_OPEN_TAG], true);
+    }
+
+    private function isClassDeclarationToken(int $tokenId, int|string|null $previousMeaningfulToken): bool
+    {
+        return $tokenId === T_CLASS
+            && $previousMeaningfulToken !== T_NEW
+            && $previousMeaningfulToken !== '::';
+    }
+
+    /**
+     * @param list<int> $classBraceDepths
+     * @param list<bool> $topLevelClassAbstractStates
+     */
+    private function readPhpSyntaxToken(
+        string $token,
+        int &$braceDepth,
+        array &$classBraceDepths,
+        bool &$pendingAbstract,
+        bool &$waitingForClassBody,
+        bool &$pendingTopLevelClassIsAbstract,
+        array &$topLevelClassAbstractStates,
+        int|string|null &$previousMeaningfulToken,
+    ): void {
+        if ($token === '{') {
+            $this->openPhpBrace(
+                $braceDepth,
+                $classBraceDepths,
+                $waitingForClassBody,
+                $pendingTopLevelClassIsAbstract,
+                $topLevelClassAbstractStates,
+            );
+        }
+
+        if ($token === '}') {
+            $this->closePhpBrace($braceDepth, $classBraceDepths);
+        }
+
+        if (trim($token) !== '') {
+            $pendingAbstract = false;
+            $previousMeaningfulToken = $token;
+        }
+    }
+
+    /**
+     * @param list<int> $classBraceDepths
+     * @param list<bool> $topLevelClassAbstractStates
+     */
+    private function openPhpBrace(
+        int &$braceDepth,
+        array &$classBraceDepths,
+        bool &$waitingForClassBody,
+        bool &$pendingTopLevelClassIsAbstract,
+        array &$topLevelClassAbstractStates,
+    ): void {
+        $braceDepth++;
+
+        if (! $waitingForClassBody) {
+            return;
+        }
+
+        $classBraceDepths[] = $braceDepth;
+        $topLevelClassAbstractStates[] = $pendingTopLevelClassIsAbstract;
+        $waitingForClassBody = false;
+        $pendingTopLevelClassIsAbstract = false;
+    }
+
+    /**
+     * @param list<int> $classBraceDepths
+     */
+    private function closePhpBrace(int &$braceDepth, array &$classBraceDepths): void
+    {
+        if ($classBraceDepths !== [] && end($classBraceDepths) === $braceDepth) {
+            array_pop($classBraceDepths);
+        }
+
+        $braceDepth = max(0, $braceDepth - 1);
     }
 
     private function resolveAbsolutePath(string $path): string

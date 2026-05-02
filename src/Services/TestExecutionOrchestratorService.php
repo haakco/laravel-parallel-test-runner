@@ -179,41 +179,19 @@ class TestExecutionOrchestratorService
             storage_path('app/test-runner.pid'),
         );
 
-        if (file_exists($pidFile)) {
-            $pid = (int) file_get_contents($pidFile);
-            if (function_exists('posix_kill') && posix_kill($pid, 0)) {
-                return BackgroundRunStartResultData::failure(
-                    sprintf('Test runner is already running (PID: %d)', $pid),
-                );
-            }
+        $runningResult = $this->existingBackgroundRunResult($pidFile);
 
-            unlink($pidFile);
+        if ($runningResult instanceof \Haakco\ParallelTestRunner\Data\Results\BackgroundRunStartResultData) {
+            return $runningResult;
         }
 
-        $logDir = $options->logDirectory ?? base_path('test-logs/' . sprintf('%s_%s', date('Ymd_His_u'), bin2hex(random_bytes(3))));
-        $createdLogDir = ! is_dir($logDir);
-        if ($createdLogDir && ! @mkdir($logDir, 0755, true) && ! is_dir($logDir)) {
-            throw new \RuntimeException(sprintf('Unable to create test log directory [%s].', $logDir));
-        }
-
-        $mainCommand = (string) config('parallel-test-runner.commands.main', 'test:run-sections');
-
-        $commandParts = ['php', 'artisan', $mainCommand];
-        foreach ($commandOptions as $key => $value) {
-            if ($key !== 'background' && $key !== 'log-dir' && $value !== false && $value !== null) {
-                $commandParts[] = $value === true ? "--{$key}" : "--{$key}=" . escapeshellarg((string) $value);
-            }
-        }
-
-        $commandParts[] = '--log-dir=' . escapeshellarg($logDir);
-        $commandString = implode(' ', $commandParts);
-        $environmentPrefix = $this->buildBackgroundEnvironmentPrefix($options);
+        [$logDir, $createdLogDir] = $this->createBackgroundLogDirectory($options);
 
         $fullCommand = sprintf(
             'cd %s && nohup env %s %s > %s/runner.log 2>&1 & echo $!',
             escapeshellarg(base_path()),
-            $environmentPrefix,
-            $commandString,
+            $this->buildBackgroundEnvironmentPrefix($options),
+            $this->buildBackgroundCommand($commandOptions, $logDir),
             escapeshellarg($logDir),
         );
         $pid = $this->resolveBackgroundProcessId(shell_exec($fullCommand));
@@ -235,6 +213,75 @@ class TestExecutionOrchestratorService
         file_put_contents($lockFile, $logDir);
 
         return BackgroundRunStartResultData::success($pid, $logDir);
+    }
+
+    private function existingBackgroundRunResult(string $pidFile): ?BackgroundRunStartResultData
+    {
+        if (! file_exists($pidFile)) {
+            return null;
+        }
+
+        $pid = (int) file_get_contents($pidFile);
+
+        if (function_exists('posix_kill') && posix_kill($pid, 0)) {
+            return BackgroundRunStartResultData::failure(
+                sprintf('Test runner is already running (PID: %d)', $pid),
+            );
+        }
+
+        unlink($pidFile);
+
+        return null;
+    }
+
+    /**
+     * @return array{0: string, 1: bool}
+     */
+    private function createBackgroundLogDirectory(TestRunOptionsData $options): array
+    {
+        $logDir = $options->logDirectory ?? $this->newBackgroundLogDirectory();
+        $createdLogDir = ! is_dir($logDir);
+
+        if ($createdLogDir && ! @mkdir($logDir, 0755, true) && ! is_dir($logDir)) {
+            throw new \RuntimeException(sprintf('Unable to create test log directory [%s].', $logDir));
+        }
+
+        return [$logDir, $createdLogDir];
+    }
+
+    private function newBackgroundLogDirectory(): string
+    {
+        return base_path('test-logs/' . sprintf('%s_%s', date('Ymd_His_u'), bin2hex(random_bytes(3))));
+    }
+
+    /**
+     * @param array<string, mixed> $commandOptions
+     */
+    private function buildBackgroundCommand(array $commandOptions, string $logDir): string
+    {
+        $mainCommand = (string) config('parallel-test-runner.commands.main', 'test:run-sections');
+        $commandParts = ['php', 'artisan', $mainCommand];
+
+        foreach ($commandOptions as $key => $value) {
+            $argument = $this->backgroundCommandArgument((string) $key, $value);
+
+            if ($argument !== null) {
+                $commandParts[] = $argument;
+            }
+        }
+
+        $commandParts[] = '--log-dir=' . escapeshellarg($logDir);
+
+        return implode(' ', $commandParts);
+    }
+
+    private function backgroundCommandArgument(string $key, mixed $value): ?string
+    {
+        if (in_array($key, ['background', 'log-dir'], true) || $value === false || $value === null) {
+            return null;
+        }
+
+        return $value === true ? "--{$key}" : "--{$key}=" . escapeshellarg((string) $value);
     }
 
     private function buildBackgroundEnvironmentPrefix(TestRunOptionsData $options): string
@@ -376,60 +423,23 @@ class TestExecutionOrchestratorService
         $exitCode = 0;
 
         try {
-            $logHandle = fopen($logFile, 'w');
-
-            $processBuilder = Process::command($command)
-                ->timeout($timeoutSeconds + 5)
-                ->tty(false)
-                ->env($this->config->getProcessEnvironment()->all());
-
-            $processResult = $processBuilder->run(null, function ($type, $data) use ($logHandle): void {
-                if ($data && $logHandle) {
-                    fwrite($logHandle, $data);
-                }
-            });
-
-            $exitCode = $processResult->exitCode();
-            if ($exitCode === 124) {
-                $timedOut = true;
-            }
+            $exitCode = $this->runSectionCommand($command, $logFile, $timeoutSeconds);
+            $timedOut = $exitCode === 124;
         } catch (ProcessTimedOutException) {
             $timedOut = true;
             $exitCode = 124;
-        } finally {
-            if (isset($logHandle) && $logHandle) {
-                fclose($logHandle);
-            }
         }
 
         $duration = microtime(true) - $startTime;
-
-        $tests = 0;
-        $assertions = 0;
-        $errors = 0;
-        $failures = 0;
-        $skipped = 0;
-
-        // Parse log output for test results
-        if (file_exists($logFile)) {
-            $logContent = file_get_contents($logFile);
-            if ($logContent !== false && $logContent !== '') {
-                $parsed = $this->outputParser->parseOutput($logContent);
-                $tests = $parsed->tests;
-                $assertions = $parsed->assertions;
-                $errors = $parsed->errors;
-                $failures = $parsed->failures;
-                $skipped = $parsed->skipped;
-            }
-        }
+        $parsed = $this->parseSectionLog($logFile);
 
         return new SectionResultData(
             success: $exitCode === 0,
-            tests: $tests,
-            assertions: $assertions,
-            errors: $errors,
-            failures: $failures,
-            skipped: $skipped,
+            tests: $parsed->tests,
+            assertions: $parsed->assertions,
+            errors: $parsed->errors,
+            failures: $parsed->failures,
+            skipped: $parsed->skipped,
             incomplete: 0,
             risky: 0,
             duration: $duration,
@@ -439,6 +449,42 @@ class TestExecutionOrchestratorService
             startedAt: $startTime,
             completedAt: $startTime + $duration,
         );
+    }
+
+    /**
+     * @param list<string> $command
+     */
+    private function runSectionCommand(array $command, string $logFile, int $timeoutSeconds): int
+    {
+        $logHandle = fopen($logFile, 'w');
+
+        try {
+            return Process::command($command)
+                ->timeout($timeoutSeconds + 5)
+                ->tty(false)
+                ->env($this->config->getProcessEnvironment()->all())
+                ->run(null, function ($type, $data) use ($logHandle): void {
+                    if ($data && $logHandle) {
+                        fwrite($logHandle, $data);
+                    }
+                })
+                ->exitCode();
+        } finally {
+            if ($logHandle) {
+                fclose($logHandle);
+            }
+        }
+    }
+
+    private function parseSectionLog(string $logFile): \Haakco\ParallelTestRunner\Data\ParsedTestOutputData
+    {
+        if (! file_exists($logFile)) {
+            return $this->outputParser->parseOutput('');
+        }
+
+        $logContent = file_get_contents($logFile);
+
+        return $this->outputParser->parseOutput($logContent === false ? '' : $logContent);
     }
 
     private function finalizeSectionRun(): bool

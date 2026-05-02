@@ -19,7 +19,7 @@ use RuntimeException;
 final class ParallelTestOrchestrator
 {
     /**
-     * @var array<int, array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int, metrics?: WorkerMetricsData}>
+     * @var array<int, array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData}>
      */
     private array $workerProcesses = [];
 
@@ -190,32 +190,13 @@ final class ParallelTestOrchestrator
             "Failed to write worker plan file: {$workerPlanFile}",
         );
 
-        $workerCommand = (string) config('parallel-test-runner.commands.worker', 'test:run-worker');
+        $executor = new SymfonyProcessWorkerExecutor();
 
-        $command = [
-            'php',
-            'artisan',
-            $workerCommand,
-            '--worker-plan-file=' . $workerPlanFile,
-            '--log-dir=' . $plan->logDirectory,
-            '--skip-env-checks',
-        ];
-
-        if ($this->debug) {
-            $command[] = '--debug';
-        }
-
-        if ($this->failFast) {
-            $command[] = '--fail-fast';
-        }
-
-        if ($plan->individual) {
-            $command[] = '--individual';
-        }
-
-        $command[] = '--timeout=' . $this->timeoutSeconds;
-
-        return $command;
+        return $executor
+            ->setDebug($this->debug)
+            ->setFailFast($this->failFast)
+            ->setTimeoutSeconds($this->timeoutSeconds)
+            ->buildCommand($plan);
     }
 
     private function monitorWorkers(): bool
@@ -230,77 +211,147 @@ final class ParallelTestOrchestrator
         while ($this->hasRunningWorkers()) {
             Sleep::usleep($checkInterval);
 
-            foreach ($this->workerProcesses as $workerId => &$worker) {
-                if ($worker['status'] !== 'running') {
-                    continue;
-                }
-
-                $process = $worker['process'];
-
-                if (! $process->running()) {
-                    $result = $process->wait();
-                    $exitCode = $result->exitCode();
-
-                    $metricsFile = $worker['plan']->logDirectory . '/execution_tracking.json';
-                    $hasMetrics = file_exists($metricsFile);
-
-                    if ($hasMetrics) {
-                        try {
-                            $payload = json_decode(file_get_contents($metricsFile), true, 512, JSON_THROW_ON_ERROR);
-                            $worker['metrics'] = WorkerMetricsData::fromExecutionTracking($payload);
-                        } catch (Exception) {
-                            $hasMetrics = false;
-                        }
-                    }
-
-                    if ($exitCode !== 0) {
-                        $allSuccess = false;
-
-                        if (! $hasMetrics) {
-                            $this->output->error("Worker {$workerId} crashed with exit code: {$exitCode}");
-                            $worker['status'] = 'crashed';
-                        } else {
-                            $worker['status'] = 'failed';
-                        }
-
-                        if ($this->failFast) {
-                            $this->terminateAllWorkers();
-
-                            return false;
-                        }
-                    } else {
-                        $worker['status'] = 'completed';
-                    }
-
-                    $worker['exit_code'] = $exitCode;
-
-                    if ($isVerbose) {
-                        $statusLabel = $worker['status'] === 'completed' ? '<fg=green>done</>' : '<fg=red>' . $worker['status'] . '</>';
-                        $this->output->writeln("  Worker {$workerId} finished ({$statusLabel})");
-                    }
-                }
-
-                $latestOutput = $process->latestOutput();
-                if ($latestOutput !== '' && $latestOutput !== '0') {
-                    $this->processWorkerOutput($workerId, $latestOutput);
-                }
+            if (! $this->pollRunningWorkers($allSuccess, $isVerbose)) {
+                return false;
             }
 
-            if ($isVerbose) {
-                $now = microtime(true);
-                if ($now - $lastProgressTime >= $progressInterval) {
-                    $lastProgressTime = $now;
-                    $this->printProgressSummary($startTime);
-                }
-            }
+            $this->printProgressSummaryWhenDue($isVerbose, $lastProgressTime, $progressInterval, $startTime);
         }
 
-        if ($isVerbose && $lastProgressTime > 0.0) {
-            $this->printProgressSummary($startTime);
-            $this->output->writeln('');
-        }
+        $this->printFinalProgressSummary($isVerbose, $lastProgressTime, $startTime);
 
         return $allSuccess;
+    }
+
+    private function pollRunningWorkers(bool &$allSuccess, bool $isVerbose): bool
+    {
+        return array_all($this->workerProcesses, fn(array $worker, int $workerId): bool => ! ($worker['status'] === 'running' && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose)));
+    }
+
+    /**
+     * @param array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData} $worker
+     */
+    private function pollWorker(int $workerId, array &$worker, bool &$allSuccess, bool $isVerbose): bool
+    {
+        $process = $worker['process'];
+
+        if (! $process->running() && ! $this->finishWorker($workerId, $worker, $allSuccess, $isVerbose)) {
+            return false;
+        }
+
+        $this->processLatestWorkerOutput($workerId, $process);
+
+        return true;
+    }
+
+    private function printProgressSummaryWhenDue(
+        bool $isVerbose,
+        float &$lastProgressTime,
+        float $progressInterval,
+        float $startTime,
+    ): void {
+        $now = microtime(true);
+
+        if ($isVerbose && $now - $lastProgressTime >= $progressInterval) {
+            $lastProgressTime = $now;
+            $this->printProgressSummary($startTime);
+        }
+    }
+
+    private function printFinalProgressSummary(bool $isVerbose, float $lastProgressTime, float $startTime): void
+    {
+        if (! $isVerbose || $lastProgressTime <= 0.0) {
+            return;
+        }
+
+        $this->printProgressSummary($startTime);
+        $this->output->writeln('');
+    }
+
+    /**
+     * @param array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData} $worker
+     */
+    private function finishWorker(int $workerId, array &$worker, bool &$allSuccess, bool $isVerbose): bool
+    {
+        $exitCode = $worker['process']->wait()->exitCode();
+        $hasMetrics = $this->loadWorkerMetrics($worker);
+
+        $worker['status'] = $this->workerStatusForExitCode($workerId, $exitCode, $hasMetrics);
+        $worker['exit_code'] = $exitCode;
+
+        if ($exitCode !== 0) {
+            $allSuccess = false;
+        }
+
+        $this->printWorkerFinished($workerId, $worker['status'], $isVerbose);
+
+        return $exitCode === 0 || ! $this->terminateAfterWorkerFailure();
+    }
+
+    /**
+     * @param array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData} $worker
+     */
+    private function loadWorkerMetrics(array &$worker): bool
+    {
+        $metricsFile = $worker['plan']->logDirectory . '/execution_tracking.json';
+
+        if (! file_exists($metricsFile)) {
+            return false;
+        }
+
+        try {
+            $payload = json_decode(file_get_contents($metricsFile), true, 512, JSON_THROW_ON_ERROR);
+            $worker['metrics'] = WorkerMetricsData::fromExecutionTracking($payload);
+
+            return true;
+        } catch (Exception) {
+            return false;
+        }
+    }
+
+    private function workerStatusForExitCode(int $workerId, int $exitCode, bool $hasMetrics): string
+    {
+        if ($exitCode === 0) {
+            return 'completed';
+        }
+
+        if (! $hasMetrics) {
+            $this->output->error("Worker {$workerId} crashed with exit code: {$exitCode}");
+
+            return 'crashed';
+        }
+
+        return 'failed';
+    }
+
+    private function terminateAfterWorkerFailure(): bool
+    {
+        if (! $this->failFast) {
+            return false;
+        }
+
+        $this->terminateAllWorkers();
+
+        return true;
+    }
+
+    private function printWorkerFinished(int $workerId, string $status, bool $isVerbose): void
+    {
+        if (! $isVerbose) {
+            return;
+        }
+
+        $statusLabel = $status === 'completed' ? '<fg=green>done</>' : '<fg=red>' . $status . '</>';
+        $this->output->writeln("  Worker {$workerId} finished ({$statusLabel})");
+    }
+
+    private function processLatestWorkerOutput(int $workerId, InvokedProcess $process): void
+    {
+        $latestOutput = $process->latestOutput();
+
+        if ($latestOutput !== '' && $latestOutput !== '0') {
+            $this->processWorkerOutput($workerId, $latestOutput);
+        }
     }
 
     private function printProgressSummary(float $startTime): void

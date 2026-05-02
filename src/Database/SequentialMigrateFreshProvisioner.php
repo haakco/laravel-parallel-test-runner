@@ -5,16 +5,10 @@ declare(strict_types=1);
 namespace Haakco\ParallelTestRunner\Database;
 
 use Haakco\ParallelTestRunner\Contracts\DatabaseProvisionerInterface;
-use Haakco\ParallelTestRunner\Contracts\DatabaseSeederInterface;
-use Haakco\ParallelTestRunner\Contracts\SchemaLoaderInterface;
-use Haakco\ParallelTestRunner\Data\CleanupContext;
 use Haakco\ParallelTestRunner\Data\ProvisionContext;
 use Haakco\ParallelTestRunner\Data\SeedContext;
-use Haakco\ParallelTestRunner\Support\DatabaseNamingStrategy;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
+use Haakco\ParallelTestRunner\Database\Concerns\HandlesProvisionedDatabases;
 use Override;
-use PDO;
 use RuntimeException;
 
 /**
@@ -24,13 +18,7 @@ use RuntimeException;
  */
 final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInterface
 {
-    /** @var list<string> */
-    private array $createdDatabases = [];
-
-    public function __construct(
-        private readonly SchemaLoaderInterface $schemaLoader,
-        private readonly DatabaseSeederInterface $seeder,
-    ) {}
+    use HandlesProvisionedDatabases;
 
     #[Override]
     public function provision(int $workerCount, ProvisionContext $context): array
@@ -39,13 +27,7 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
             throw new RuntimeException('Worker count must be at least 1');
         }
 
-        $namingStrategy = $this->buildNamingStrategy($context);
-
-        $splitTotal = $context->extraOptions['split_total'] ?? null;
-        $splitGroup = $context->extraOptions['split_group'] ?? null;
-
-        $databases = [];
-
+        $databases = $this->workerDatabases($workerCount, $context);
         $noRefreshDb = (bool) ($context->extraOptions['no_refresh_db'] ?? false);
 
         $this->reportProgress(
@@ -57,11 +39,7 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
             ),
         );
 
-        for ($i = 1; $i <= $workerCount; $i++) {
-            $dbName = $splitTotal !== null && $splitGroup !== null
-                ? $namingStrategy->forWorkerWithSplit($i, (int) $splitTotal, (int) $splitGroup)
-                : $namingStrategy->forWorker($i);
-
+        foreach ($databases as $i => $dbName) {
             $this->reportProgress(
                 $context,
                 sprintf('Provisioning database %s (worker %d/%d)', $dbName, $i, $workerCount),
@@ -74,7 +52,6 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
                 $this->resetDatabase($dbName, $context);
             }
 
-            $databases[$i] = $dbName;
             $this->createdDatabases[] = $dbName;
 
             $this->seedDatabase($dbName, $context);
@@ -82,22 +59,6 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
         }
 
         return $databases;
-    }
-
-    #[Override]
-    public function cleanup(CleanupContext $context): void
-    {
-        if ($context->keepDatabases) {
-            return;
-        }
-
-        $databasesToClean = $context->databases !== [] ? $context->databases : $this->createdDatabases;
-
-        foreach ($databasesToClean as $dbName) {
-            $this->dropDatabase($dbName);
-        }
-
-        $this->createdDatabases = [];
     }
 
     /**
@@ -110,84 +71,6 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
         $this->reportProgress($context, sprintf('Creating database %s', $dbName));
         $this->createDatabase($dbName);
         $this->migrateFreshDatabase($dbName, $context);
-    }
-
-    /**
-     * Create a database on the admin connection.
-     */
-    private function createDatabase(string $dbName): void
-    {
-        $adminConnection = (string) config('parallel-test-runner.database.admin_connection', 'pgsql');
-        $pdo = DB::connection($adminConnection)->getPdo();
-        $pdo->exec(sprintf('CREATE DATABASE "%s"', str_replace('"', '""', $dbName)));
-    }
-
-    /**
-     * Drop a database using the configured drop strategy.
-     */
-    private function dropDatabase(string $dbName): void
-    {
-        $adminConnection = (string) config('parallel-test-runner.database.admin_connection', 'pgsql');
-        $dropStrategy = (string) config('parallel-test-runner.database.drop_strategy', 'with_force');
-        $pdo = DB::connection($adminConnection)->getPdo();
-
-        if ($dropStrategy === 'terminate_then_drop') {
-            $this->terminateConnections($pdo, $dbName);
-            $pdo->exec(sprintf('DROP DATABASE IF EXISTS "%s"', str_replace('"', '""', $dbName)));
-        } else {
-            // with_force strategy
-            $pdo->exec(sprintf('DROP DATABASE IF EXISTS "%s" WITH (FORCE)', str_replace('"', '""', $dbName)));
-        }
-    }
-
-    /**
-     * Terminate all active connections to a database.
-     *
-     * @param PDO $pdo
-     */
-    private function terminateConnections($pdo, string $dbName): void
-    {
-        $statement = $pdo->prepare(
-            'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :dbname AND pid <> pg_backend_pid()',
-        );
-        $statement->execute(['dbname' => $dbName]);
-    }
-
-    /**
-     * Run migrate:fresh on the provisioned database.
-     */
-    private function migrateFreshDatabase(string $dbName, ProvisionContext $context): void
-    {
-        $originalDb = config("database.connections.{$context->connection}.database");
-        $originalDefault = config('database.default');
-
-        try {
-            config(["database.connections.{$context->connection}.database" => $dbName]);
-            config(['database.default' => $context->connection]);
-
-            DB::purge($context->connection);
-            DB::reconnect($context->connection);
-
-            if ($context->useSchemaLoad) {
-                $this->reportProgress($context, sprintf('Loading schema into %s', $dbName));
-                $this->schemaLoader->loadSchema($context->connection, $dbName);
-            }
-
-            $this->reportProgress($context, sprintf('Running migrate:fresh on %s', $dbName));
-            $this->runMigrationCommand(
-                'migrate:fresh',
-                [
-                    '--database' => $context->connection,
-                    '--force' => true,
-                    '--step' => true,
-                ],
-                $context,
-            );
-        } finally {
-            DB::purge($context->connection);
-            config(["database.connections.{$context->connection}.database" => $originalDb]);
-            config(['database.default' => $originalDefault]);
-        }
     }
 
     /**
@@ -207,144 +90,5 @@ final class SequentialMigrateFreshProvisioner implements DatabaseProvisionerInte
         );
 
         $this->seeder->seed($seedContext);
-    }
-
-    /**
-     * Check if a database exists on the admin connection.
-     */
-    private function databaseExists(string $dbName): bool
-    {
-        $adminConnection = (string) config('parallel-test-runner.database.admin_connection', 'pgsql');
-        $pdo = DB::connection($adminConnection)->getPdo();
-        $statement = $pdo->prepare('SELECT 1 FROM pg_database WHERE datname = :dbname');
-        $statement->execute(['dbname' => $dbName]);
-
-        return $statement->fetchColumn() !== false;
-    }
-
-    /**
-     * Ensure a database exists. If it does, apply pending migrations; if not, create and migrate:fresh.
-     */
-    private function ensureDatabaseExists(string $dbName, ProvisionContext $context): void
-    {
-        if ($this->databaseExists($dbName)) {
-            $this->reportProgress($context, sprintf('Applying pending migrations to %s', $dbName));
-            $this->ensureMigrationsUpToDate($dbName, $context);
-        } else {
-            $this->reportProgress($context, sprintf('Creating database %s', $dbName));
-            $this->createDatabase($dbName);
-            $this->migrateFreshDatabase($dbName, $context);
-        }
-    }
-
-    /**
-     * Apply only pending migrations to an existing database (no drop/recreate).
-     */
-    private function ensureMigrationsUpToDate(string $dbName, ProvisionContext $context): void
-    {
-        $originalDb = config("database.connections.{$context->connection}.database");
-        $originalDefault = config('database.default');
-
-        try {
-            config(["database.connections.{$context->connection}.database" => $dbName]);
-            config(['database.default' => $context->connection]);
-
-            DB::purge($context->connection);
-            DB::reconnect($context->connection);
-
-            $this->reportProgress($context, sprintf('Running migrate on %s', $dbName));
-            $this->runMigrationCommand(
-                'migrate',
-                [
-                    '--database' => $context->connection,
-                    '--force' => true,
-                    '--step' => true,
-                ],
-                $context,
-            );
-        } finally {
-            DB::purge($context->connection);
-            config(["database.connections.{$context->connection}.database" => $originalDb]);
-            config(['database.default' => $originalDefault]);
-        }
-    }
-
-    private function buildNamingStrategy(ProvisionContext $context): DatabaseNamingStrategy
-    {
-        return new DatabaseNamingStrategy(
-            baseName: $context->baseName,
-            workerPattern: (string) config('parallel-test-runner.db_naming.pattern', '{base}_w{worker}'),
-            splitPattern: (string) config('parallel-test-runner.db_naming.split_pattern', '{base}_s{total}g{group}_w{worker}'),
-        );
-    }
-
-    /**
-     * @param array<string, bool|string> $arguments
-     */
-    private function runMigrationCommand(string $command, array $arguments, ProvisionContext $context): void
-    {
-        $this->withMigrationLockOverride(
-            $context,
-            static fn(): int => Artisan::call($command, $arguments),
-        );
-    }
-
-    private function withMigrationLockOverride(ProvisionContext $context, callable $callback): void
-    {
-        $ignoreLock = (bool) ($context->extraOptions['ignore_lock'] ?? false);
-
-        if (! $ignoreLock) {
-            $callback();
-
-            return;
-        }
-
-        $originalEnv = getenv('TEST_IGNORE_MIGRATION_LOCK');
-        $originalServer = $_SERVER['TEST_IGNORE_MIGRATION_LOCK'] ?? null;
-        $originalGlobal = $_ENV['TEST_IGNORE_MIGRATION_LOCK'] ?? null;
-
-        putenv('TEST_IGNORE_MIGRATION_LOCK=1');
-        $_SERVER['TEST_IGNORE_MIGRATION_LOCK'] = '1';
-        $_ENV['TEST_IGNORE_MIGRATION_LOCK'] = '1';
-
-        try {
-            $callback();
-        } finally {
-            $this->restoreEnvValue('TEST_IGNORE_MIGRATION_LOCK', $originalEnv, $originalServer, $originalGlobal);
-        }
-    }
-
-    private function restoreEnvValue(
-        string $key,
-        string|false $originalEnv,
-        mixed $originalServer,
-        mixed $originalGlobal,
-    ): void {
-        if ($originalEnv === false) {
-            putenv($key);
-        } else {
-            putenv(sprintf('%s=%s', $key, $originalEnv));
-        }
-
-        if ($originalServer === null) {
-            unset($_SERVER[$key]);
-        } else {
-            $_SERVER[$key] = $originalServer;
-        }
-
-        if ($originalGlobal === null) {
-            unset($_ENV[$key]);
-        } else {
-            $_ENV[$key] = $originalGlobal;
-        }
-    }
-
-    private function reportProgress(ProvisionContext $context, string $message): void
-    {
-        $callback = $context->extraOptions['on_progress'] ?? null;
-
-        if (is_callable($callback)) {
-            $callback($message);
-        }
     }
 }

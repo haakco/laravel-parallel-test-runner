@@ -80,48 +80,65 @@ final class TrackingLoader
         );
 
         foreach ($iterator as $fileInfo) {
-            if (! $fileInfo instanceof \SplFileInfo) {
-                continue;
-            }
-
-            $file = $fileInfo->getPathname();
-            if (! str_ends_with($file, '_junit.xml')) {
-                continue;
-            }
-
-            $xml = @simplexml_load_file($file);
-            if ($xml === false) {
-                continue;
-            }
-
-            $testSuite = $xml->testsuite;
-            if ($testSuite === null) {
-                continue;
-            }
-
-            foreach ($testSuite->testcase as $testCase) {
-                $class = (string) ($testCase['class'] ?? '');
-                $method = (string) ($testCase['name'] ?? '');
-                $duration = (float) ($testCase['time'] ?? 0.0);
-                if ($class === '') {
-                    continue;
-                }
-                if ($method === '') {
-                    continue;
-                }
-
-                $metrics[] = [
-                    'class' => $class,
-                    'method' => $method,
-                    'duration' => $duration,
-                    'suite' => basename($file),
-                ];
-            }
+            $metrics = array_merge($metrics, $this->extractJUnitMethodMetrics($fileInfo));
         }
 
         usort($metrics, static fn(array $a, array $b): int => $b['duration'] <=> $a['duration']);
 
         return array_slice($metrics, 0, $limit);
+    }
+
+    /**
+     * @return list<array{class: string, method: string, duration: float, suite: string}>
+     */
+    private function extractJUnitMethodMetrics(mixed $fileInfo): array
+    {
+        if (! $fileInfo instanceof \SplFileInfo || ! $this->isJUnitReport($fileInfo)) {
+            return [];
+        }
+
+        $xml = @simplexml_load_file($fileInfo->getPathname());
+
+        if ($xml === false || $xml->testsuite === null) {
+            return [];
+        }
+
+        $metrics = [];
+
+        foreach ($xml->testsuite->testcase as $testCase) {
+            $metric = $this->methodMetricFromTestCase($testCase, basename($fileInfo->getPathname()));
+
+            if ($metric !== null) {
+                $metrics[] = $metric;
+            }
+        }
+
+        return $metrics;
+    }
+
+    private function isJUnitReport(\SplFileInfo $fileInfo): bool
+    {
+        return str_ends_with($fileInfo->getPathname(), '_junit.xml');
+    }
+
+    /**
+     * @return array{class: string, method: string, duration: float, suite: string}|null
+     */
+    private function methodMetricFromTestCase(\SimpleXMLElement $testCase, string $suite): ?array
+    {
+        $class = (string) ($testCase['class'] ?? '');
+        $method = (string) ($testCase['name'] ?? '');
+
+        if ($class === '' || $method === '') {
+            return null;
+        }
+
+        return [
+            'class' => $class,
+            'method' => $method,
+            'duration' => (float) ($testCase['time'] ?? 0.0),
+            'suite' => $suite,
+        ];
     }
 
     /**

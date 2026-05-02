@@ -236,43 +236,27 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
             $character = $command[$cursor];
 
             if ($character === '\\') {
-                if ($inSingleQuotes) {
-                    $token .= $character;
-                    $tokenStarted = true;
-
-                    continue;
-                }
-
-                $cursor++;
-
-                if ($cursor < $length) {
-                    $token .= $command[$cursor];
-                    $tokenStarted = true;
-                }
+                $this->appendEscapedCharacter($command, $cursor, $token, $tokenStarted, $inSingleQuotes);
 
                 continue;
             }
 
-            if ($character === "'" && ! $inDoubleQuotes) {
+            if ($this->isSingleQuoteBoundary($character, $inDoubleQuotes)) {
                 $inSingleQuotes = ! $inSingleQuotes;
                 $tokenStarted = true;
 
                 continue;
             }
 
-            if ($character === '"' && ! $inSingleQuotes) {
+            if ($this->isDoubleQuoteBoundary($character, $inSingleQuotes)) {
                 $inDoubleQuotes = ! $inDoubleQuotes;
                 $tokenStarted = true;
 
                 continue;
             }
 
-            if (ctype_space($character) && ! $inSingleQuotes && ! $inDoubleQuotes) {
-                if ($tokenStarted) {
-                    $tokens[] = $token;
-                    $token = '';
-                    $tokenStarted = false;
-                }
+            if ($this->isTokenBoundary($character, $inSingleQuotes, $inDoubleQuotes)) {
+                $this->appendToken($tokens, $token, $tokenStarted);
 
                 continue;
             }
@@ -286,6 +270,57 @@ final readonly class JsonRunReportWriter implements TestRunReportWriterInterface
         }
 
         return $tokens;
+    }
+
+    private function appendEscapedCharacter(
+        string $command,
+        int &$cursor,
+        string &$token,
+        bool &$tokenStarted,
+        bool $inSingleQuotes,
+    ): void {
+        if ($inSingleQuotes) {
+            $token .= '\\';
+            $tokenStarted = true;
+
+            return;
+        }
+
+        $cursor++;
+
+        if ($cursor < strlen($command)) {
+            $token .= $command[$cursor];
+            $tokenStarted = true;
+        }
+    }
+
+    private function isSingleQuoteBoundary(string $character, bool $inDoubleQuotes): bool
+    {
+        return $character === "'" && ! $inDoubleQuotes;
+    }
+
+    private function isDoubleQuoteBoundary(string $character, bool $inSingleQuotes): bool
+    {
+        return $character === '"' && ! $inSingleQuotes;
+    }
+
+    private function isTokenBoundary(string $character, bool $inSingleQuotes, bool $inDoubleQuotes): bool
+    {
+        return ctype_space($character) && ! $inSingleQuotes && ! $inDoubleQuotes;
+    }
+
+    /**
+     * @param list<string> $tokens
+     */
+    private function appendToken(array &$tokens, string &$token, bool &$tokenStarted): void
+    {
+        if (! $tokenStarted) {
+            return;
+        }
+
+        $tokens[] = $token;
+        $token = '';
+        $tokenStarted = false;
     }
 
     /**
