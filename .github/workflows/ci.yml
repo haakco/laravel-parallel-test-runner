@@ -15,7 +15,7 @@ permissions:
 jobs:
   lint:
     name: Lint (PHP ${{ matrix.php }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
@@ -57,8 +57,7 @@ jobs:
 
   check-coupling:
     name: Check coupling
-    runs-on: ubuntu-latest
-
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v6
 
@@ -69,7 +68,7 @@ jobs:
 
   test:
     name: Test (PHP ${{ matrix.php }}, Laravel ${{ matrix.laravel }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
