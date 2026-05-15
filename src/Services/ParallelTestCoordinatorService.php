@@ -88,6 +88,7 @@ class ParallelTestCoordinatorService
             $success = $orchestrator->executeWorkerPlans($workerPlans);
 
             $sectionResults = $orchestrator->getSectionResults();
+            $sectionWorkerMap = $orchestrator->getSectionWorkerMap();
 
             foreach ($sectionResults as $sectionName => $resultData) {
                 $result = $resultData ?? SectionResultData::createEmpty();
@@ -98,7 +99,11 @@ class ParallelTestCoordinatorService
                     $this->state->markFailed($sectionName);
                 }
 
-                $this->tracker->recordSectionResult($sectionName, $result);
+                $this->tracker->recordSectionResult(
+                    $sectionName,
+                    $result,
+                    $sectionWorkerMap[$sectionName] ?? null,
+                );
             }
 
             $metrics = $orchestrator->getAggregatedMetrics();

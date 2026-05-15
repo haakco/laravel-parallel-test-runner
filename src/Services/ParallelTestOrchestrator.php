@@ -26,6 +26,9 @@ final class ParallelTestOrchestrator
     /** @var array<string, SectionResultData> */
     private array $sectionResults = [];
 
+    /** @var array<string, int> Section name → owning worker id. */
+    private array $sectionWorkerMap = [];
+
     /** @var array{tests: int, assertions: int, errors: int, failures: int, warnings: int, skipped: int, incomplete: int, risky: int, duration: float} */
     private array $aggregatedMetrics = [
         'tests' => 0,
@@ -92,6 +95,12 @@ final class ParallelTestOrchestrator
     public function getSectionResults(): array
     {
         return $this->sectionResults;
+    }
+
+    /** @return array<string, int> Section name → owning worker id. */
+    public function getSectionWorkerMap(): array
+    {
+        return $this->sectionWorkerMap;
     }
 
     /** @return array{tests: int, assertions: int, errors: int, failures: int, warnings: int, skipped: int, incomplete: int, risky: int, duration: float} */
@@ -218,9 +227,16 @@ final class ParallelTestOrchestrator
 
     private function pollRunningWorkers(bool &$allSuccess, bool $isVerbose): bool
     {
+        // Arrow functions auto-capture variables by value, which breaks the
+        // by-reference flow of $allSuccess into pollWorker(). Use a full
+        // closure with explicit `use (&$allSuccess, $isVerbose)` so worker
+        // failures propagate to the outer flag.
         return array_all(
             $this->workerProcesses,
-            fn(WorkerProcessStateData $worker, int $workerId): bool => ! ($worker->status->isRunning() && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose)),
+            function (WorkerProcessStateData $worker, int $workerId) use (&$allSuccess, $isVerbose): bool {
+                return ! ($worker->status->isRunning()
+                    && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose));
+            },
         );
     }
 
@@ -454,29 +470,30 @@ final class ParallelTestOrchestrator
         $this->output->info('Aggregating results from all workers...');
 
         $metricsAggregate = WorkerMetricsData::createEmpty();
+        $this->sectionWorkerMap = [];
 
-        foreach ($this->workerProcesses as $worker) {
+        foreach ($this->workerProcesses as $workerId => $worker) {
             $plan = $worker->plan;
             $metricsFile = $this->resolveMetricsFile($plan->logDirectory);
 
-            if ($metricsFile === null) {
-                $metricsAggregate = $metricsAggregate->accumulate(
-                    $this->buildFailureMetricsFromPlan($plan, $worker->exitCode ?? 1),
-                );
+            $workerMetrics = null;
 
-                continue;
+            if ($metricsFile !== null) {
+                $payload = json_decode(file_get_contents($metricsFile), true, 512, JSON_THROW_ON_ERROR);
+                if (is_array($payload)) {
+                    $workerMetrics = WorkerMetricsData::fromExecutionTracking($payload);
+                }
             }
 
-            $payload = json_decode(file_get_contents($metricsFile), true, 512, JSON_THROW_ON_ERROR);
-            if (! is_array($payload)) {
-                $metricsAggregate = $metricsAggregate->accumulate(
-                    $this->buildFailureMetricsFromPlan($plan, $worker->exitCode ?? 1),
-                );
-
-                continue;
+            if (! $workerMetrics instanceof \Haakco\ParallelTestRunner\Data\Parallel\WorkerMetricsData) {
+                $workerMetrics = $this->buildFailureMetricsFromPlan($plan, $worker->exitCode ?? 1);
             }
 
-            $metricsAggregate = $metricsAggregate->accumulate(WorkerMetricsData::fromExecutionTracking($payload));
+            $metricsAggregate = $metricsAggregate->accumulate($workerMetrics);
+
+            foreach (array_keys($workerMetrics->sections) as $sectionName) {
+                $this->sectionWorkerMap[(string) $sectionName] = $workerId;
+            }
         }
 
         $this->aggregatedMetrics = array_merge(

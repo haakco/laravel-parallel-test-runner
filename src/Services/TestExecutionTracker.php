@@ -63,19 +63,29 @@ final class TestExecutionTracker
 
     /**
      * Record a section result and update totals.
+     *
+     * The optional $workerId attributes the section to the worker that ran
+     * it so downstream reporting (failure listings, run reports) can show
+     * the correct worker context instead of defaulting to 1.
      */
-    public function recordSectionResult(string $section, SectionResultData $result): void
+    public function recordSectionResult(string $section, SectionResultData $result, ?int $workerId = null): void
     {
         $startedAt = $result->startedAt > 0 ? $result->startedAt : microtime(true) - $result->duration;
         $completedAt = $result->completedAt > 0 ? $result->completedAt : $startedAt + $result->duration;
 
-        $this->executionData['sections'][$section] = [
+        $entry = [
             'status' => $result->success ? 'passed' : 'failed',
             'started_at' => $startedAt,
             'completed_at' => $completedAt,
             'duration' => $result->duration,
             'results' => $result->toTrackerArray(),
         ];
+
+        if ($workerId !== null) {
+            $entry['worker_id'] = $workerId;
+        }
+
+        $this->executionData['sections'][$section] = $entry;
 
         $this->updateTotalsFromResult($result);
         $this->save();

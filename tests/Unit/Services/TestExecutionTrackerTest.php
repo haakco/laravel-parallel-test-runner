@@ -176,4 +176,37 @@ final class TestExecutionTrackerTest extends TestCase
         $this->assertSame(250, $totals['assertions']);
         $this->assertSame(2, $totals['errors']);
     }
+
+    /**
+     * Regression: run_report.json failure entries reported every failing
+     * section as worker_id=1 because the tracker never stored the owning
+     * worker's id. The optional workerId argument lets parallel coordinators
+     * record which worker ran which section so the report can attribute
+     * failures back to the correct worker.
+     */
+    public function test_records_owning_worker_id_for_a_section(): void
+    {
+        $tracker = new TestExecutionTracker($this->tempDir);
+
+        $tracker->recordSectionResult('Feature/Auth', new SectionResultData(
+            success: false,
+            tests: 5,
+            assertions: 12,
+            errors: 0,
+            failures: 1,
+            skipped: 0,
+            incomplete: 0,
+            risky: 0,
+            duration: 2.0,
+            exitCode: 1,
+            timedOut: false,
+            logFile: '',
+            startedAt: 0.0,
+            completedAt: 2.0,
+        ), workerId: 7);
+
+        $sectionData = $tracker->getSectionResult('Feature/Auth');
+        $this->assertNotNull($sectionData);
+        $this->assertSame(7, $sectionData['worker_id'] ?? null);
+    }
 }
