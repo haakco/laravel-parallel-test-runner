@@ -6,6 +6,8 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services;
 
 use Haakco\ParallelTestRunner\Data\Parallel\SectionAssignmentData;
 use Haakco\ParallelTestRunner\Data\Parallel\WorkerPlanData;
+use Haakco\ParallelTestRunner\Data\Parallel\WorkerProcessStateData;
+use Haakco\ParallelTestRunner\Data\Parallel\WorkerProcessStatus;
 use Haakco\ParallelTestRunner\Services\ParallelTestOrchestrator;
 use Haakco\ParallelTestRunner\Tests\TestCase;
 use Illuminate\Console\OutputStyle;
@@ -96,14 +98,7 @@ final class ParallelTestOrchestratorTest extends TestCase
         $class = new ReflectionClass($orchestrator);
         $workerProcesses = $class->getProperty('workerProcesses');
         $workerProcesses->setValue($orchestrator, [
-            1 => [
-                'process' => new InvokedProcess($process),
-                'plan' => $plan,
-                'status' => 'running',
-                'completed_sections' => 0,
-                'total_sections' => 1,
-                'output_buffer' => '',
-            ],
+            1 => WorkerProcessStateData::running(new InvokedProcess($process), $plan),
         ]);
 
         $allSuccess = true;
@@ -112,7 +107,7 @@ final class ParallelTestOrchestratorTest extends TestCase
         $this->assertTrue($pollRunningWorkers->invokeArgs($orchestrator, [&$allSuccess, false]));
 
         $workers = $workerProcesses->getValue($orchestrator);
-        $this->assertSame('completed', $workers[1]['status']);
+        $this->assertSame(WorkerProcessStatus::Completed, $workers[1]->status);
     }
 
     private function createOrchestrator(): ParallelTestOrchestrator

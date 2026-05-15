@@ -10,6 +10,8 @@ use Haakco\ParallelTestRunner\Data\Parallel\SectionResultData;
 use Haakco\ParallelTestRunner\Data\Parallel\WorkerMetricsData;
 use Haakco\ParallelTestRunner\Data\Parallel\WorkerPlanData;
 use Haakco\ParallelTestRunner\Data\Parallel\WorkerPlanFileData;
+use Haakco\ParallelTestRunner\Data\Parallel\WorkerProcessStateData;
+use Haakco\ParallelTestRunner\Data\Parallel\WorkerProcessStatus;
 use Illuminate\Console\OutputStyle;
 use Illuminate\Process\InvokedProcess;
 use Illuminate\Support\Facades\Process;
@@ -18,9 +20,7 @@ use RuntimeException;
 
 final class ParallelTestOrchestrator
 {
-    /**
-     * @var array<int, array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData}>
-     */
+    /** @var array<int, WorkerProcessStateData> */
     private array $workerProcesses = [];
 
     /** @var array<string, SectionResultData> */
@@ -145,14 +145,7 @@ final class ParallelTestOrchestrator
                 ->command($command)
                 ->start();
 
-            $this->workerProcesses[$plan->workerId] = [
-                'process' => $process,
-                'plan' => $plan,
-                'status' => 'running',
-                'completed_sections' => 0,
-                'total_sections' => count($plan->sections),
-                'output_buffer' => '',
-            ];
+            $this->workerProcesses[$plan->workerId] = WorkerProcessStateData::running($process, $plan);
 
             $commandLog[] = [
                 'worker_id' => $plan->workerId,
@@ -225,23 +218,15 @@ final class ParallelTestOrchestrator
 
     private function pollRunningWorkers(bool &$allSuccess, bool $isVerbose): bool
     {
-        foreach ($this->workerProcesses as $workerId => &$worker) {
-            if ($worker['status'] === 'running' && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose)) {
-                return false;
-            }
-        }
-
-        unset($worker);
-
-        return true;
+        return array_all(
+            $this->workerProcesses,
+            fn(WorkerProcessStateData $worker, int $workerId): bool => ! ($worker->status->isRunning() && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose)),
+        );
     }
 
-    /**
-     * @param array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData} $worker
-     */
-    private function pollWorker(int $workerId, array &$worker, bool &$allSuccess, bool $isVerbose): bool
+    private function pollWorker(int $workerId, WorkerProcessStateData $worker, bool &$allSuccess, bool $isVerbose): bool
     {
-        $process = $worker['process'];
+        $process = $worker->process;
 
         if (! $process->running() && ! $this->finishWorker($workerId, $worker, $allSuccess, $isVerbose)) {
             return false;
@@ -276,32 +261,28 @@ final class ParallelTestOrchestrator
         $this->output->writeln('');
     }
 
-    /**
-     * @param array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData} $worker
-     */
-    private function finishWorker(int $workerId, array &$worker, bool &$allSuccess, bool $isVerbose): bool
+    private function finishWorker(int $workerId, WorkerProcessStateData $worker, bool &$allSuccess, bool $isVerbose): bool
     {
-        $exitCode = $worker['process']->wait()->exitCode();
+        $exitCode = $worker->process->wait()->exitCode();
         $hasMetrics = $this->loadWorkerMetrics($worker);
 
-        $worker['status'] = $this->workerStatusForExitCode($workerId, $exitCode, $hasMetrics);
-        $worker['exit_code'] = $exitCode;
+        $worker->markFinished(
+            status: $this->workerStatusForExitCode($workerId, $exitCode, $hasMetrics),
+            exitCode: $exitCode,
+        );
 
         if ($exitCode !== 0) {
             $allSuccess = false;
         }
 
-        $this->printWorkerFinished($workerId, $worker['status'], $isVerbose);
+        $this->printWorkerFinished($workerId, $worker->status, $isVerbose);
 
         return $exitCode === 0 || ! $this->terminateAfterWorkerFailure();
     }
 
-    /**
-     * @param array{process: InvokedProcess, plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string, exit_code?: int|null, metrics?: WorkerMetricsData} $worker
-     */
-    private function loadWorkerMetrics(array &$worker): bool
+    private function loadWorkerMetrics(WorkerProcessStateData $worker): bool
     {
-        $metricsFile = $worker['plan']->logDirectory . '/execution_tracking.json';
+        $metricsFile = $worker->plan->logDirectory . '/execution_tracking.json';
 
         if (! file_exists($metricsFile)) {
             return false;
@@ -309,7 +290,7 @@ final class ParallelTestOrchestrator
 
         try {
             $payload = json_decode(file_get_contents($metricsFile), true, 512, JSON_THROW_ON_ERROR);
-            $worker['metrics'] = WorkerMetricsData::fromExecutionTracking($payload);
+            $worker->metrics = WorkerMetricsData::fromExecutionTracking($payload);
 
             return true;
         } catch (Exception) {
@@ -317,19 +298,19 @@ final class ParallelTestOrchestrator
         }
     }
 
-    private function workerStatusForExitCode(int $workerId, int $exitCode, bool $hasMetrics): string
+    private function workerStatusForExitCode(int $workerId, int $exitCode, bool $hasMetrics): WorkerProcessStatus
     {
         if ($exitCode === 0) {
-            return 'completed';
+            return WorkerProcessStatus::Completed;
         }
 
         if (! $hasMetrics) {
             $this->output->error("Worker {$workerId} crashed with exit code: {$exitCode}");
 
-            return 'crashed';
+            return WorkerProcessStatus::Crashed;
         }
 
-        return 'failed';
+        return WorkerProcessStatus::Failed;
     }
 
     private function terminateAfterWorkerFailure(): bool
@@ -343,13 +324,13 @@ final class ParallelTestOrchestrator
         return true;
     }
 
-    private function printWorkerFinished(int $workerId, string $status, bool $isVerbose): void
+    private function printWorkerFinished(int $workerId, WorkerProcessStatus $status, bool $isVerbose): void
     {
         if (! $isVerbose) {
             return;
         }
 
-        $statusLabel = $status === 'completed' ? '<fg=green>done</>' : '<fg=red>' . $status . '</>';
+        $statusLabel = $status->isSuccessful() ? '<fg=green>done</>' : '<fg=red>' . $status->value . '</>';
         $this->output->writeln("  Worker {$workerId} finished ({$statusLabel})");
     }
 
@@ -374,13 +355,13 @@ final class ParallelTestOrchestrator
         $completedSections = 0;
 
         foreach ($this->workerProcesses as $worker) {
-            $totalSections += $worker['total_sections'];
+            $totalSections += $worker->totalSections;
 
-            match ($worker['status']) {
-                'running' => $running++,
-                'completed' => $done++,
-                'failed', 'crashed' => $failed++,
-                default => null,
+            match ($worker->status) {
+                WorkerProcessStatus::Running => $running++,
+                WorkerProcessStatus::Completed => $done++,
+                WorkerProcessStatus::Failed, WorkerProcessStatus::Crashed => $failed++,
+                WorkerProcessStatus::Terminated => null,
             };
 
             $completedSections += $this->countCompletedSectionsFromTracking($worker);
@@ -402,18 +383,15 @@ final class ParallelTestOrchestrator
         $this->output->write("  [{$elapsedFormatted}] Workers: {$workerStatus} | Sections: {$completedSections}/{$totalSections}");
     }
 
-    /**
-     * @param array{plan: WorkerPlanData, status: string, completed_sections: int, total_sections: int, output_buffer: string} $worker
-     */
-    private function countCompletedSectionsFromTracking(array $worker): int
+    private function countCompletedSectionsFromTracking(WorkerProcessStateData $worker): int
     {
-        if ($worker['status'] !== 'running') {
-            return $worker['total_sections'];
+        if (! $worker->status->isRunning()) {
+            return $worker->totalSections;
         }
 
-        $trackingFile = $worker['plan']->logDirectory . '/execution_tracking.json';
+        $trackingFile = $worker->plan->logDirectory . '/execution_tracking.json';
         if (! file_exists($trackingFile)) {
-            return $worker['completed_sections'];
+            return $worker->completedSections;
         }
 
         try {
@@ -428,7 +406,7 @@ final class ParallelTestOrchestrator
 
             return $completed;
         } catch (Exception) {
-            return $worker['completed_sections'];
+            return $worker->completedSections;
         }
     }
 
@@ -436,7 +414,7 @@ final class ParallelTestOrchestrator
     {
         return array_any(
             $this->workerProcesses,
-            static fn(array $worker): bool => $worker['status'] === 'running',
+            static fn(WorkerProcessStateData $worker): bool => $worker->status->isRunning(),
         );
     }
 
@@ -444,21 +422,21 @@ final class ParallelTestOrchestrator
     {
         $this->output->warning('Terminating all workers...');
 
-        foreach ($this->workerProcesses as &$worker) {
-            if ($worker['status'] === 'running') {
-                $worker['process']->stop();
-                $worker['status'] = 'terminated';
+        foreach ($this->workerProcesses as $worker) {
+            if ($worker->status->isRunning()) {
+                $worker->process->stop();
+                $worker->status = WorkerProcessStatus::Terminated;
             }
         }
     }
 
     private function processWorkerOutput(int $workerId, string $outputText): void
     {
-        $this->workerProcesses[$workerId]['output_buffer'] .= $outputText;
+        $this->workerProcesses[$workerId]->outputBuffer .= $outputText;
 
         if (preg_match('/\[(\d+)\/(\d+)\]/', $outputText, $matches)) {
-            $this->workerProcesses[$workerId]['completed_sections'] = (int) $matches[1];
-            $this->workerProcesses[$workerId]['total_sections'] = (int) $matches[2];
+            $this->workerProcesses[$workerId]->completedSections = (int) $matches[1];
+            $this->workerProcesses[$workerId]->totalSections = (int) $matches[2];
         }
 
         if ($this->debug) {
@@ -478,12 +456,12 @@ final class ParallelTestOrchestrator
         $metricsAggregate = WorkerMetricsData::createEmpty();
 
         foreach ($this->workerProcesses as $worker) {
-            $plan = $worker['plan'];
+            $plan = $worker->plan;
             $metricsFile = $this->resolveMetricsFile($plan->logDirectory);
 
             if ($metricsFile === null) {
                 $metricsAggregate = $metricsAggregate->accumulate(
-                    $this->buildFailureMetricsFromPlan($plan, $worker['exit_code'] ?? 1),
+                    $this->buildFailureMetricsFromPlan($plan, $worker->exitCode ?? 1),
                 );
 
                 continue;
@@ -492,7 +470,7 @@ final class ParallelTestOrchestrator
             $payload = json_decode(file_get_contents($metricsFile), true, 512, JSON_THROW_ON_ERROR);
             if (! is_array($payload)) {
                 $metricsAggregate = $metricsAggregate->accumulate(
-                    $this->buildFailureMetricsFromPlan($plan, $worker['exit_code'] ?? 1),
+                    $this->buildFailureMetricsFromPlan($plan, $worker->exitCode ?? 1),
                 );
 
                 continue;
