@@ -225,7 +225,15 @@ final class ParallelTestOrchestrator
 
     private function pollRunningWorkers(bool &$allSuccess, bool $isVerbose): bool
     {
-        return array_all($this->workerProcesses, fn(array $worker, int $workerId): bool => ! ($worker['status'] === 'running' && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose)));
+        foreach ($this->workerProcesses as $workerId => &$worker) {
+            if ($worker['status'] === 'running' && ! $this->pollWorker($workerId, $worker, $allSuccess, $isVerbose)) {
+                return false;
+            }
+        }
+
+        unset($worker);
+
+        return true;
     }
 
     /**

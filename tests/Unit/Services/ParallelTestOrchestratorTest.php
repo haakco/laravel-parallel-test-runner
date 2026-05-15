@@ -9,8 +9,12 @@ use Haakco\ParallelTestRunner\Data\Parallel\WorkerPlanData;
 use Haakco\ParallelTestRunner\Services\ParallelTestOrchestrator;
 use Haakco\ParallelTestRunner\Tests\TestCase;
 use Illuminate\Console\OutputStyle;
+use Illuminate\Process\InvokedProcess;
+use ReflectionClass;
+use ReflectionMethod;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
+use Symfony\Component\Process\Process;
 
 final class ParallelTestOrchestratorTest extends TestCase
 {
@@ -68,6 +72,47 @@ final class ParallelTestOrchestratorTest extends TestCase
         $this->assertSame(1, $plan->workerId);
         $this->assertSame(['tests/Unit/FooTest'], $plan->sectionNames());
         $this->assertSame('test_db_w1', $plan->database);
+    }
+
+    public function test_polling_finished_worker_persists_completed_status(): void
+    {
+        $orchestrator = $this->createOrchestrator();
+        $plan = new WorkerPlanData(
+            workerId: 1,
+            sections: [
+                SectionAssignmentData::fromName('tests/Unit/FooTest'),
+            ],
+            database: 'test_db_w1',
+            logDirectory: sys_get_temp_dir() . '/ptr-worker-' . uniqid(),
+            suite: 'standard',
+            estimatedWeight: 10.0,
+            individual: false,
+        );
+
+        $process = new Process(['php', '-r', '']);
+        $process->start();
+        $process->wait();
+
+        $class = new ReflectionClass($orchestrator);
+        $workerProcesses = $class->getProperty('workerProcesses');
+        $workerProcesses->setValue($orchestrator, [
+            1 => [
+                'process' => new InvokedProcess($process),
+                'plan' => $plan,
+                'status' => 'running',
+                'completed_sections' => 0,
+                'total_sections' => 1,
+                'output_buffer' => '',
+            ],
+        ]);
+
+        $allSuccess = true;
+        $pollRunningWorkers = new ReflectionMethod($orchestrator, 'pollRunningWorkers');
+
+        $this->assertTrue($pollRunningWorkers->invokeArgs($orchestrator, [&$allSuccess, false]));
+
+        $workers = $workerProcesses->getValue($orchestrator);
+        $this->assertSame('completed', $workers[1]['status']);
     }
 
     private function createOrchestrator(): ParallelTestOrchestrator
