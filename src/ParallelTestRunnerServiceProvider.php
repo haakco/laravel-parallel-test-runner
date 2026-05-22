@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Haakco\ParallelTestRunner;
 
+use Haakco\ParallelTestRunner\Commands\PruneTestLogsCommand;
 use Haakco\ParallelTestRunner\Commands\TestCommand;
 use Haakco\ParallelTestRunner\Commands\TestReportValidateCommand;
 use Haakco\ParallelTestRunner\Commands\TestRunSectionsCommand;
@@ -67,6 +68,7 @@ class ParallelTestRunnerServiceProvider extends ServiceProvider
                 TestRunSectionsCommand::class,
                 TestRunWorkerCommand::class,
                 TestReportValidateCommand::class,
+                PruneTestLogsCommand::class,
             ];
 
             if (config('parallel-test-runner.override_test_command', true)) {

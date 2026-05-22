@@ -130,6 +130,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Log Retention
+    |--------------------------------------------------------------------------
+    |
+    | Each test run creates a fresh `test-logs/YYYYMMDD_HHMMSS_*` directory.
+    | Without retention these accumulate indefinitely and can poison tooling
+    | that walks the project tree (Metro/watchman, file indexers, backups).
+    |
+    | Set either limit to null to disable that axis. When both are set, the
+    | more restrictive limit wins (a directory is kept only if it is among
+    | the `max_runs` most recent AND younger than `max_age_days`).
+    |
+    | A directory is identified as a run dir by its `YYYYMMDD_HHMMSS_…` prefix;
+    | the `latest` symlink and any other entries are never deleted.
+    */
+    'retention' => [
+        'max_runs' => 20,
+        'max_age_days' => 7,
+        // Run the pruner automatically before each new run-dir is created.
+        // Disable if you prefer to run `php artisan test:logs-prune` manually.
+        'auto_prune' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Worker Plan DB Naming
     |--------------------------------------------------------------------------
     */

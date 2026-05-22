@@ -130,6 +130,8 @@ class TestRunnerService
 
     private function createLogDirectory(): string
     {
+        $this->autoPruneIfEnabled();
+
         $dir = $this->createUniqueLogDirectory();
 
         $latest = base_path('test-logs/latest');
@@ -142,6 +144,39 @@ class TestRunnerService
         }
 
         return $dir;
+    }
+
+    /**
+     * Apply the configured retention policy to test-logs/ before creating a
+     * new run directory. Failures here must not block a test run — the
+     * pruner is a hygiene step, not a correctness gate.
+     */
+    private function autoPruneIfEnabled(): void
+    {
+        if (! (bool) config('parallel-test-runner.retention.auto_prune', true)) {
+            return;
+        }
+
+        try {
+            $service = new TestLogRetentionService(
+                base_path('test-logs'),
+                $this->configToNullableInt(config('parallel-test-runner.retention.max_runs')),
+                $this->configToNullableInt(config('parallel-test-runner.retention.max_age_days')),
+            );
+
+            $service->prune();
+        } catch (\Throwable) {
+            // Swallow — never block a test run because retention failed.
+        }
+    }
+
+    private function configToNullableInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return (int) $value;
     }
 
     private function removeExistingLatestPath(string $latest): void
