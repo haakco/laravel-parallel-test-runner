@@ -140,6 +140,14 @@ class TestRunnerService
     private function createLogDirectory(): string
     {
         if (! $this->shouldPublishTopLevelRunDirectory()) {
+            $activeRunDirectory = $this->activeRunDirectory();
+            if ($activeRunDirectory !== null) {
+                self::$processLogDirectory = $activeRunDirectory;
+                $this->configService->setLogDirectoryEnvironment($activeRunDirectory);
+
+                return $activeRunDirectory;
+            }
+
             $dir = $this->createAuxiliaryLogDirectory();
             self::$processLogDirectory = $dir;
             $this->configService->setLogDirectoryEnvironment($dir);
@@ -152,6 +160,7 @@ class TestRunnerService
         $dir = $this->createUniqueLogDirectory();
         self::$processLogDirectory = $dir;
         $this->configService->setLogDirectoryEnvironment($dir);
+        $this->writeActiveRunDirectory($dir);
 
         $latest = base_path('test-logs/latest');
         $this->removeExistingLatestPath($latest);
@@ -170,6 +179,79 @@ class TestRunnerService
         $argv = $_SERVER['argv'] ?? [];
 
         return in_array('test:run-sections', $argv, true) || in_array('test', $argv, true);
+    }
+
+    private function activeRunDirectory(): ?string
+    {
+        $activeRunFile = $this->activeRunFile();
+        if (! is_file($activeRunFile)) {
+            return null;
+        }
+
+        $payload = json_decode((string) @file_get_contents($activeRunFile), true);
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $pid = $payload['pid'] ?? null;
+        $logDirectory = $payload['logDirectory'] ?? null;
+
+        if (! is_int($pid) || ! is_string($logDirectory) || $logDirectory === '' || ! is_dir($logDirectory)) {
+            return null;
+        }
+
+        if (! $this->isProcessRunning($pid)) {
+            return null;
+        }
+
+        return $logDirectory;
+    }
+
+    private function writeActiveRunDirectory(string $logDirectory): void
+    {
+        $activeRunFile = $this->activeRunFile();
+        $this->ensureDirectoryExists(dirname($activeRunFile));
+
+        $payload = json_encode([
+            'pid' => getmypid(),
+            'logDirectory' => $logDirectory,
+        ], JSON_THROW_ON_ERROR);
+
+        @file_put_contents($activeRunFile, $payload, LOCK_EX);
+
+        register_shutdown_function(function () use ($activeRunFile, $payload): void {
+            if (! is_file($activeRunFile)) {
+                return;
+            }
+
+            if ((string) @file_get_contents($activeRunFile) !== $payload) {
+                return;
+            }
+
+            @unlink($activeRunFile);
+        });
+    }
+
+    private function activeRunFile(): string
+    {
+        return base_path('test-logs/.active-run');
+    }
+
+    private function isProcessRunning(int $pid): bool
+    {
+        if ($pid <= 0) {
+            return false;
+        }
+
+        if ($pid === getmypid()) {
+            return true;
+        }
+
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+
+        return false;
     }
 
     private function createAuxiliaryLogDirectory(): string
