@@ -80,6 +80,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
         {
             unset($GLOBALS['ptr_test_runner_service_overrides']);
             @unlink(base_path('test-logs/.active-run'));
+            putenv('PARALLEL_TEST_RUNNER_ROLE');
             putenv('PARALLEL_TEST_RUNNER_LOG_DIR');
             putenv('TEST_LOG_DIR');
             TestRunnerService::resetProcessLogDirectoryForTesting();
@@ -238,6 +239,28 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 new TestDatabaseManagerService(),
                 new HangingTestDetectorService(),
             );
+            $logDir = $service->getLogDirectory();
+
+            $this->assertStringContainsString('/test-logs/auxiliary/', $logDir);
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
+        }
+
+        public function test_worker_role_prevents_top_level_publish_even_when_marked(): void
+        {
+            putenv('PARALLEL_TEST_RUNNER_ROLE=worker');
+            $_SERVER['argv'] = ['artisan', 'test:run-sections'];
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = new TestRunnerService(
+                new TestRunnerConfigurationService(),
+                $this->createStub(TestExecutionOrchestratorService::class),
+                new TestDatabaseManagerService(),
+                new HangingTestDetectorService(),
+            );
+            $service->publishTopLevelRunDirectory();
             $logDir = $service->getLogDirectory();
 
             $this->assertStringContainsString('/test-logs/auxiliary/', $logDir);

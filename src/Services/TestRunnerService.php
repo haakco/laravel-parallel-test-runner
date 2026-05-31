@@ -199,7 +199,8 @@ class TestRunnerService
 
     private function shouldPublishTopLevelRunDirectory(): bool
     {
-        return $this->publishesTopLevelRunDirectory;
+        return $this->publishesTopLevelRunDirectory
+            && getenv('PARALLEL_TEST_RUNNER_ROLE') !== 'worker';
     }
 
     private function activeRunDirectory(bool $requireLiveProcess): ?string
