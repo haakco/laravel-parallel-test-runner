@@ -48,13 +48,25 @@ class TestRunnerService
 
     public function runConfigured(): TestRunResultData
     {
-        return $this->executionService->runConfigured($this->getLogDirectory());
+        $logDirectory = $this->getLogDirectory();
+
+        try {
+            return $this->executionService->runConfigured($logDirectory);
+        } finally {
+            $this->finalizeLogDirectory($logDirectory);
+        }
     }
 
     /** @param array<string, mixed> $options */
     public function run(array $options = []): bool
     {
-        return $this->executionService->run($options, $this->getLogDirectory());
+        $logDirectory = $this->getLogDirectory();
+
+        try {
+            return $this->executionService->run($options, $logDirectory);
+        } finally {
+            $this->finalizeLogDirectory($logDirectory);
+        }
     }
 
     /** @return Collection<int, TestSectionData> */
@@ -164,14 +176,7 @@ class TestRunnerService
         $this->configService->setLogDirectoryEnvironment($dir);
         $this->writeActiveRunDirectory($dir);
 
-        $latest = base_path('test-logs/latest');
-        $this->removeExistingLatestPath($latest);
-
-        if (File::exists(dirname($latest))) {
-            // Use a relative symlink so host/container base-path differences
-            // do not break `test-logs/latest`.
-            @symlink(basename($dir), $latest);
-        }
+        $this->publishLatestSymlink($dir);
 
         return $dir;
     }
@@ -236,6 +241,61 @@ class TestRunnerService
 
             @unlink($activeRunFile);
         });
+    }
+
+    private function finalizeLogDirectory(string $logDirectory): void
+    {
+        if (! $this->isTopLevelRunDirectory($logDirectory)) {
+            return;
+        }
+
+        $this->removeEmptySiblingRunDirectories($logDirectory);
+        $this->publishLatestSymlink($logDirectory);
+    }
+
+    private function publishLatestSymlink(string $logDirectory): void
+    {
+        $latest = base_path('test-logs/latest');
+        $this->removeExistingLatestPath($latest);
+
+        if (File::exists(dirname($latest))) {
+            // Use a relative symlink so host/container base-path differences
+            // do not break `test-logs/latest`.
+            @symlink(basename($logDirectory), $latest);
+        }
+    }
+
+    private function removeEmptySiblingRunDirectories(string $logDirectory): void
+    {
+        $baseDirectory = dirname($logDirectory);
+        $runStartedAt = @filemtime($logDirectory) ?: 0;
+
+        foreach (File::directories($baseDirectory) as $directory) {
+            if ($directory === $logDirectory) {
+                continue;
+            }
+            if (! $this->isTopLevelRunDirectory($directory)) {
+                continue;
+            }
+            $directoryCreatedAt = @filemtime($directory) ?: 0;
+            if ($directoryCreatedAt < $runStartedAt) {
+                continue;
+            }
+            if (File::files($directory) !== []) {
+                continue;
+            }
+            if (File::directories($directory) !== []) {
+                continue;
+            }
+
+            @File::deleteDirectory($directory);
+        }
+    }
+
+    private function isTopLevelRunDirectory(string $directory): bool
+    {
+        return dirname($directory) === base_path('test-logs')
+            && preg_match('/^\d{8}_\d{6}_\d{6}_[0-9a-f]{6}$/', basename($directory)) === 1;
     }
 
     private function activeRunFile(): string

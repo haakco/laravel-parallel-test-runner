@@ -354,6 +354,41 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertTrue($result->success);
         }
 
+        public function test_run_configured_restores_latest_and_removes_empty_sibling_directories(): void
+        {
+            $executionService = $this->createMock(TestExecutionOrchestratorService::class);
+            $executionService->expects($this->once())
+                ->method('runConfigured')
+                ->willReturnCallback(function (string $logDirectory): TestRunResultData {
+                    $siblingDirectory = dirname($logDirectory) . '/99991231_235959_000000_abcdef';
+                    mkdir($siblingDirectory, 0755, true);
+
+                    $latest = dirname($logDirectory) . '/latest';
+                    if (is_link($latest) || is_file($latest)) {
+                        unlink($latest);
+                    }
+
+                    symlink(basename($siblingDirectory), $latest);
+
+                    return TestRunResultData::success('All passed', 1.5);
+                });
+
+            $service = new TestRunnerService(
+                $this->createStub(TestRunnerConfigurationService::class),
+                $executionService,
+                new TestDatabaseManagerService(),
+                new HangingTestDetectorService(),
+            );
+
+            $logDirectory = $service->getLogDirectory();
+            $result = $service->runConfigured();
+
+            $latest = base_path('test-logs/latest');
+            $this->assertTrue($result->success);
+            $this->assertSame(basename($logDirectory), is_link($latest) ? readlink($latest) : null);
+            $this->assertDirectoryDoesNotExist(dirname($logDirectory) . '/99991231_235959_000000_abcdef');
+        }
+
         public function test_list_sections_delegates(): void
         {
             $executionService = $this->createMock(TestExecutionOrchestratorService::class);
