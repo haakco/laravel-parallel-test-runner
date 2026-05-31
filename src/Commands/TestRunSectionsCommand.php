@@ -36,6 +36,7 @@ final class TestRunSectionsCommand extends Command
                             {--split-total= : Split tests into N groups}
                             {--split-group= : Run only group X (1-based, requires --split-total)}
                             {--individual : Run each test file individually}
+                            {--worker : Run as a worker/sub-runner and never publish top-level log pointers}
                             {--skip-env-checks : Skip environment validation}
                             {--debug-native : Enable native crash diagnostics}
                             {--emit-metrics=1 : Write runtime metrics (set to 0 to disable)}
@@ -97,7 +98,8 @@ final class TestRunSectionsCommand extends Command
 
     private function isWorkerProcess(): bool
     {
-        return getenv('PARALLEL_TEST_RUNNER_ROLE') === 'worker';
+        return (bool) $this->option('worker')
+            || getenv('PARALLEL_TEST_RUNNER_ROLE') === 'worker';
     }
 
     private function resolveSplitTotal(): false|int|null

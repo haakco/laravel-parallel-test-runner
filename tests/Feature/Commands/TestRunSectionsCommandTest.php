@@ -90,6 +90,37 @@ final class TestRunSectionsCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_worker_option_does_not_publish_top_level_run_directory(): void
+    {
+        $this->testRunner
+            ->shouldReceive('publishTopLevelRunDirectory')
+            ->never();
+        $this->testRunner
+            ->shouldReceive('markAsWorker')
+            ->once()
+            ->andReturn($this->testRunner);
+        $this->testRunner
+            ->shouldReceive('configure')
+            ->once()
+            ->andReturn(new TestRunnerConfigurationFeedbackData(
+                message: 'Configuration applied',
+                settings: [],
+            ));
+        $this->testRunner
+            ->shouldReceive('listSectionsWithGroups')
+            ->with(null, null)
+            ->once()
+            ->andReturn(new SectionListResultData(
+                sections: [],
+                totalFiles: 0,
+                totalSections: 0,
+            ));
+
+        $this->artisan('test:run-sections', ['--list' => true, '--worker' => true])
+            ->expectsOutputToContain('No test sections found')
+            ->assertSuccessful();
+    }
+
     public function test_split_total_must_be_at_least_two(): void
     {
         $this->artisan('test:run-sections', ['--split-total' => 1])
