@@ -53,12 +53,24 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
     final class TestRunnerServiceTest extends TestCase
     {
+        /** @var list<string> */
+        private array $originalArgv = [];
+
+        protected function setUp(): void
+        {
+            parent::setUp();
+
+            $this->originalArgv = $_SERVER['argv'] ?? [];
+            $_SERVER['argv'] = ['artisan', 'test:run-sections'];
+        }
+
         protected function tearDown(): void
         {
             unset($GLOBALS['ptr_test_runner_service_overrides']);
             putenv('PARALLEL_TEST_RUNNER_LOG_DIR');
             putenv('TEST_LOG_DIR');
             TestRunnerService::resetProcessLogDirectoryForTesting();
+            $_SERVER['argv'] = $this->originalArgv;
 
             parent::tearDown();
         }
@@ -183,6 +195,21 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
             $this->assertSame($logDir, getenv('PARALLEL_TEST_RUNNER_LOG_DIR'));
             $this->assertSame($logDir, getenv('TEST_LOG_DIR'));
+        }
+
+        public function test_non_runner_context_uses_auxiliary_log_directory_without_moving_latest(): void
+        {
+            $_SERVER['argv'] = ['artisan', 'queue:work'];
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = $this->createService();
+            $logDir = $service->getLogDirectory();
+
+            $this->assertStringContainsString('/test-logs/auxiliary/', $logDir);
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
         }
 
         public function test_set_log_directory_is_forwarded_to_child_process_environment(): void

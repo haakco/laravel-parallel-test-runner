@@ -139,6 +139,14 @@ class TestRunnerService
 
     private function createLogDirectory(): string
     {
+        if (! $this->shouldPublishTopLevelRunDirectory()) {
+            $dir = $this->createAuxiliaryLogDirectory();
+            self::$processLogDirectory = $dir;
+            $this->configService->setLogDirectoryEnvironment($dir);
+
+            return $dir;
+        }
+
         $this->autoPruneIfEnabled();
 
         $dir = $this->createUniqueLogDirectory();
@@ -155,6 +163,29 @@ class TestRunnerService
         }
 
         return $dir;
+    }
+
+    private function shouldPublishTopLevelRunDirectory(): bool
+    {
+        $argv = $_SERVER['argv'] ?? [];
+
+        return in_array('test:run-sections', $argv, true) || in_array('test', $argv, true);
+    }
+
+    private function createAuxiliaryLogDirectory(): string
+    {
+        $baseDirectory = base_path('test-logs/auxiliary');
+        $this->ensureDirectoryExists($baseDirectory);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $directory = $baseDirectory . '/' . $this->generateLogDirectoryName();
+
+            if (@mkdir($directory, 0755, true) || is_dir($directory)) {
+                return $directory;
+            }
+        }
+
+        throw new \RuntimeException(sprintf('Unable to create auxiliary test log directory under [%s].', $baseDirectory));
     }
 
     private function applyExistingLogDirectory(string $logDirectory): void
