@@ -9,6 +9,7 @@ use Haakco\ParallelTestRunner\Data\Parallel\WorkerPlanData;
 use Haakco\ParallelTestRunner\Data\Parallel\WorkerProcessStateData;
 use Haakco\ParallelTestRunner\Data\Parallel\WorkerProcessStatus;
 use Haakco\ParallelTestRunner\Services\ParallelTestOrchestrator;
+use Haakco\ParallelTestRunner\Services\SymfonyProcessWorkerExecutor;
 use Haakco\ParallelTestRunner\Tests\TestCase;
 use Illuminate\Console\OutputStyle;
 use Illuminate\Process\InvokedProcess;
@@ -16,7 +17,7 @@ use ReflectionClass;
 use ReflectionMethod;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
-use Symfony\Component\Process\Process;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 final class ParallelTestOrchestratorTest extends TestCase
 {
@@ -118,7 +119,7 @@ final class ParallelTestOrchestratorTest extends TestCase
             individual: false,
         );
 
-        $finishedProcess = new Process(['php', '-r', '']);
+        $finishedProcess = new SymfonyProcess(['php', '-r', '']);
         $finishedProcess->start();
         $finishedProcess->wait();
 
@@ -156,6 +157,32 @@ final class ParallelTestOrchestratorTest extends TestCase
         $this->assertSame('test_db_w1', $plan->database);
     }
 
+    public function test_start_workers_uses_executor_environment_with_forced_log_directory_refs(): void
+    {
+        config()->set('parallel-test-runner.worker_environment.set_test_log_dir', false);
+
+        $orchestrator = $this->createOrchestrator();
+        $workerLogDir = sys_get_temp_dir() . '/ptr-worker-env-' . uniqid();
+        $plan = new WorkerPlanData(
+            workerId: 1,
+            sections: [
+                SectionAssignmentData::fromName('tests/Unit/FooTest'),
+            ],
+            database: 'test_db_w1',
+            logDirectory: $workerLogDir,
+            suite: 'standard',
+            estimatedWeight: 10.0,
+            individual: false,
+        );
+
+        $buildWorkerEnvironment = new ReflectionMethod($orchestrator, 'buildWorkerEnvironment');
+        $environment = $buildWorkerEnvironment->invoke($orchestrator, $plan, new SymfonyProcessWorkerExecutor());
+
+        $this->assertSame($workerLogDir, $environment['PARALLEL_TEST_RUNNER_LOG_DIR'] ?? null);
+        $this->assertSame($workerLogDir, $environment['TEST_LOG_DIR'] ?? null);
+        $this->assertSame('["tests\/Unit\/FooTest"]', $environment['WORKER_SECTIONS'] ?? null);
+    }
+
     public function test_polling_finished_worker_persists_completed_status(): void
     {
         $orchestrator = $this->createOrchestrator();
@@ -171,7 +198,7 @@ final class ParallelTestOrchestratorTest extends TestCase
             individual: false,
         );
 
-        $process = new Process(['php', '-r', '']);
+        $process = new SymfonyProcess(['php', '-r', '']);
         $process->start();
         $process->wait();
 
@@ -214,7 +241,7 @@ final class ParallelTestOrchestratorTest extends TestCase
 
         // Process exits with non-zero so finishWorker should set
         // $allSuccess = false. Use `exit(1)` to be portable.
-        $process = new Process(['php', '-r', 'exit(1);']);
+        $process = new SymfonyProcess(['php', '-r', 'exit(1);']);
         $process->start();
         $process->wait();
 
@@ -261,7 +288,7 @@ final class ParallelTestOrchestratorTest extends TestCase
             individual: false,
         );
 
-        $process = new Process(['php', '-r', '']);
+        $process = new SymfonyProcess(['php', '-r', '']);
         $process->start();
         $process->wait();
 
@@ -279,6 +306,57 @@ final class ParallelTestOrchestratorTest extends TestCase
         $workers = $workerProcesses->getValue($orchestrator);
         $this->assertSame(3, $workers[1]->completedSections);
         $this->assertSame(3, $workers[1]->totalSections);
+    }
+
+    public function test_tracking_file_completed_count_does_not_move_progress_backwards(): void
+    {
+        $orchestrator = $this->createOrchestrator();
+        $workerLogDir = sys_get_temp_dir() . '/ptr-worker-progress-' . uniqid();
+        mkdir($workerLogDir, 0755, true);
+        file_put_contents(
+            $workerLogDir . '/execution_tracking.json',
+            json_encode([
+                'sections' => [
+                    'tests/Unit/FooTest' => ['completed_at' => 100],
+                    'tests/Unit/BarTest' => ['completed_at' => null],
+                    'tests/Unit/BazTest' => ['completed_at' => null],
+                ],
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        $plan = new WorkerPlanData(
+            workerId: 1,
+            sections: [
+                SectionAssignmentData::fromName('tests/Unit/FooTest'),
+                SectionAssignmentData::fromName('tests/Unit/BarTest'),
+                SectionAssignmentData::fromName('tests/Unit/BazTest'),
+            ],
+            database: 'test_db_w1',
+            logDirectory: $workerLogDir,
+            suite: 'standard',
+            estimatedWeight: 10.0,
+            individual: false,
+        );
+
+        $process = new SymfonyProcess(['php', '-r', '']);
+        $process->start();
+        $process->wait();
+
+        $class = new ReflectionClass($orchestrator);
+        $workerProcesses = $class->getProperty('workerProcesses');
+        $worker = WorkerProcessStateData::running(new InvokedProcess($process), $plan);
+        $worker->completedSections = 3;
+        $worker->totalSections = 3;
+        $workerProcesses->setValue($orchestrator, [
+            1 => $worker,
+        ]);
+
+        $countCompletedSectionsFromTracking = new ReflectionMethod($orchestrator, 'countCompletedSectionsFromTracking');
+
+        $this->assertSame(
+            3,
+            $countCompletedSectionsFromTracking->invoke($orchestrator, $workerProcesses->getValue($orchestrator)[1]),
+        );
     }
 
     private function createOrchestrator(): ParallelTestOrchestrator

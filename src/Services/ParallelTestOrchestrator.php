@@ -139,14 +139,14 @@ final class ParallelTestOrchestrator
         $commandLog = [];
 
         foreach ($workerPlans as $plan) {
-            $command = $this->buildWorkerCommand($plan);
+            $executor = $this->configuredWorkerExecutor();
+            $command = $this->buildWorkerCommand($plan, $executor);
 
             if ($this->debug) {
                 $this->output->comment("Worker {$plan->workerId} command: " . implode(' ', $command));
             }
 
-            $environment = $plan->environment();
-            $environment['WORKER_SECTIONS'] = json_encode($plan->sectionNames(), JSON_THROW_ON_ERROR);
+            $environment = $this->buildWorkerEnvironment($plan, $executor);
 
             /** @var InvokedProcess $process */
             $process = Process::timeout($this->timeoutSeconds)
@@ -173,7 +173,7 @@ final class ParallelTestOrchestrator
     }
 
     /** @return list<string> */
-    private function buildWorkerCommand(WorkerPlanData $plan): array
+    private function buildWorkerCommand(WorkerPlanData $plan, SymfonyProcessWorkerExecutor $executor): array
     {
         $workerPlanFile = $plan->logDirectory . '/worker_plan.json';
 
@@ -192,13 +192,23 @@ final class ParallelTestOrchestrator
             "Failed to write worker plan file: {$workerPlanFile}",
         );
 
-        $executor = new SymfonyProcessWorkerExecutor();
+        return $executor->buildCommand($plan);
+    }
 
-        return $executor
+    private function configuredWorkerExecutor(): SymfonyProcessWorkerExecutor
+    {
+        return new SymfonyProcessWorkerExecutor()
             ->setDebug($this->debug)
             ->setFailFast($this->failFast)
-            ->setTimeoutSeconds($this->timeoutSeconds)
-            ->buildCommand($plan);
+            ->setTimeoutSeconds($this->timeoutSeconds);
+    }
+
+    /** @return array<string, string> */
+    private function buildWorkerEnvironment(
+        WorkerPlanData $plan,
+        SymfonyProcessWorkerExecutor $executor,
+    ): array {
+        return $executor->buildEnvironment($plan);
     }
 
     private function monitorWorkers(): bool
@@ -420,7 +430,7 @@ final class ParallelTestOrchestrator
                 }
             }
 
-            return $completed;
+            return max($worker->completedSections, $completed);
         } catch (Exception) {
             return $worker->completedSections;
         }
