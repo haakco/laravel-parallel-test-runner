@@ -300,6 +300,42 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
         }
 
+        public function test_top_level_runner_ignores_stale_active_run_directory(): void
+        {
+            $staleRunDir = base_path('test-logs/20260531_120000_000000_654abc');
+            if (! is_dir($staleRunDir)) {
+                mkdir($staleRunDir, 0755, true);
+            }
+
+            file_put_contents(base_path('test-logs/.active-run'), json_encode([
+                'pid' => 99999999,
+                'logDirectory' => $staleRunDir,
+            ], JSON_THROW_ON_ERROR));
+
+            $service = $this->createService();
+            $logDir = $service->getLogDirectory();
+
+            $this->assertNotSame($staleRunDir, $logDir);
+            $this->assertStringContainsString('/test-logs/', $logDir);
+            $this->assertSame(basename($logDir), is_link(base_path('test-logs/latest')) ? readlink(base_path('test-logs/latest')) : null);
+        }
+
+        public function test_missing_active_run_directory_removes_stale_marker(): void
+        {
+            $_SERVER['argv'] = ['artisan', 'queue:work'];
+            $missingRunDir = base_path('test-logs/20260531_120000_000000_missing');
+
+            file_put_contents(base_path('test-logs/.active-run'), json_encode([
+                'pid' => getmypid(),
+                'logDirectory' => $missingRunDir,
+            ], JSON_THROW_ON_ERROR));
+
+            $service = $this->createService();
+
+            $this->assertNotSame($missingRunDir, $service->getLogDirectory());
+            $this->assertFileDoesNotExist(base_path('test-logs/.active-run'));
+        }
+
         public function test_active_run_directory_can_be_reused_without_posix_extension(): void
         {
             $activeRunDir = base_path('test-logs/20260531_120000_000000_456abc');
@@ -308,7 +344,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             }
 
             file_put_contents(base_path('test-logs/.active-run'), json_encode([
-                'pid' => getmypid(),
+                'pid' => \posix_getppid(),
                 'logDirectory' => $activeRunDir,
             ], JSON_THROW_ON_ERROR));
 
@@ -320,6 +356,30 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $service = $this->createService();
 
             $this->assertSame($activeRunDir, $service->getLogDirectory());
+        }
+
+        public function test_non_runner_active_run_directory_reuses_existing_directory_even_when_pid_is_not_visible(): void
+        {
+            $_SERVER['argv'] = ['artisan', 'queue:work'];
+            $activeRunDir = base_path('test-logs/20260531_120000_000000_789abc');
+            if (! is_dir($activeRunDir)) {
+                mkdir($activeRunDir, 0755, true);
+            }
+
+            file_put_contents(base_path('test-logs/.active-run'), json_encode([
+                'pid' => 99999999,
+                'logDirectory' => $activeRunDir,
+            ], JSON_THROW_ON_ERROR));
+
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = $this->createService();
+
+            $this->assertSame($activeRunDir, $service->getLogDirectory());
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
         }
 
         public function test_set_log_directory_is_forwarded_to_child_process_environment(): void

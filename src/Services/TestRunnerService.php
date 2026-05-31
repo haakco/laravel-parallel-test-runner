@@ -152,7 +152,7 @@ class TestRunnerService
     private function createLogDirectory(): string
     {
         $shouldPublishTopLevelRunDirectory = $this->shouldPublishTopLevelRunDirectory();
-        $activeRunDirectory = $this->activeRunDirectory();
+        $activeRunDirectory = $this->activeRunDirectory(requireLiveProcess: $shouldPublishTopLevelRunDirectory);
 
         if ($activeRunDirectory !== null) {
             self::$processLogDirectory = $activeRunDirectory;
@@ -188,7 +188,7 @@ class TestRunnerService
         return in_array('test:run-sections', $argv, true) || in_array('test', $argv, true);
     }
 
-    private function activeRunDirectory(): ?string
+    private function activeRunDirectory(bool $requireLiveProcess): ?string
     {
         $activeRunFile = $this->activeRunFile();
         if (! is_file($activeRunFile)) {
@@ -200,18 +200,44 @@ class TestRunnerService
             return null;
         }
 
-        $pid = $payload['pid'] ?? null;
         $logDirectory = $payload['logDirectory'] ?? null;
 
-        if (! is_int($pid) || ! is_string($logDirectory) || $logDirectory === '' || ! is_dir($logDirectory)) {
+        if (! is_string($logDirectory) || $logDirectory === '') {
             return null;
         }
 
-        if (! $this->isProcessRunning($pid)) {
+        if (! is_dir($logDirectory)) {
+            @unlink($activeRunFile);
+
+            return null;
+        }
+
+        if ($requireLiveProcess && ! $this->activeRunProcessIsVisible($payload)) {
+            @unlink($activeRunFile);
+
             return null;
         }
 
         return $logDirectory;
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function activeRunProcessIsVisible(array $payload): bool
+    {
+        $pid = $payload['pid'] ?? null;
+        if (! is_int($pid) || $pid <= 0) {
+            return false;
+        }
+
+        if ($pid === getmypid()) {
+            return true;
+        }
+
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+
+        return is_dir('/proc/' . $pid);
     }
 
     private function writeActiveRunDirectory(string $logDirectory): void
@@ -297,23 +323,6 @@ class TestRunnerService
     private function activeRunFile(): string
     {
         return base_path('test-logs/.active-run');
-    }
-
-    private function isProcessRunning(int $pid): bool
-    {
-        if ($pid <= 0) {
-            return false;
-        }
-
-        if ($pid === getmypid()) {
-            return true;
-        }
-
-        if (function_exists('posix_kill')) {
-            return @posix_kill($pid, 0);
-        }
-
-        return is_dir('/proc/' . $pid);
     }
 
     private function createAuxiliaryLogDirectory(): string
