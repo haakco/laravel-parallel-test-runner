@@ -20,6 +20,8 @@ use Illuminate\Support\Facades\File;
 
 class TestRunnerService
 {
+    private static ?string $processLogDirectory = null;
+
     private ?string $logDirectory = null;
 
     public function __construct(
@@ -28,7 +30,7 @@ class TestRunnerService
         private readonly TestDatabaseManagerService $databaseService,
         private readonly HangingTestDetectorService $hangingTestService,
     ) {
-        $this->logDirectory = $this->ambientLogDirectory();
+        $this->logDirectory = $this->ambientLogDirectory() ?? self::$processLogDirectory;
 
         if ($this->logDirectory !== null) {
             $this->configService->setLogDirectoryEnvironment($this->logDirectory);
@@ -130,11 +132,18 @@ class TestRunnerService
         return $this->configService;
     }
 
+    public static function resetProcessLogDirectoryForTesting(): void
+    {
+        self::$processLogDirectory = null;
+    }
+
     private function createLogDirectory(): string
     {
         $this->autoPruneIfEnabled();
 
         $dir = $this->createUniqueLogDirectory();
+        self::$processLogDirectory = $dir;
+        $this->configService->setLogDirectoryEnvironment($dir);
 
         $latest = base_path('test-logs/latest');
         $this->removeExistingLatestPath($latest);
@@ -152,6 +161,7 @@ class TestRunnerService
     {
         $this->ensureDirectoryExists($logDirectory);
         $this->logDirectory = $logDirectory;
+        self::$processLogDirectory = $logDirectory;
         $this->configService->setLogDirectoryEnvironment($logDirectory);
     }
 

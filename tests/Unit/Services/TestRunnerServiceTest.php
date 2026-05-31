@@ -58,6 +58,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             unset($GLOBALS['ptr_test_runner_service_overrides']);
             putenv('PARALLEL_TEST_RUNNER_LOG_DIR');
             putenv('TEST_LOG_DIR');
+            TestRunnerService::resetProcessLogDirectoryForTesting();
 
             parent::tearDown();
         }
@@ -153,6 +154,21 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
 
             rmdir($ambientDir);
+        }
+
+        public function test_reuses_process_log_directory_across_service_instances(): void
+        {
+            $firstService = $this->createService();
+            $firstLogDir = $firstService->getLogDirectory();
+            $topLevelRunsAfterFirstService = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestAfterFirstService = is_link($latest) ? readlink($latest) : null;
+
+            $secondService = $this->createService();
+
+            $this->assertSame($firstLogDir, $secondService->getLogDirectory());
+            $this->assertSame($topLevelRunsAfterFirstService, $this->topLevelRunDirectories());
+            $this->assertSame($latestAfterFirstService, is_link($latest) ? readlink($latest) : null);
         }
 
         public function test_set_log_directory_is_forwarded_to_child_process_environment(): void
