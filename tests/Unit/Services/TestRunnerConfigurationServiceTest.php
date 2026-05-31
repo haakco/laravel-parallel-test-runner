@@ -218,6 +218,23 @@ final class TestRunnerConfigurationServiceTest extends TestCase
         $this->assertContains(base_path('tests/Unit/FooTest.php'), $parts);
     }
 
+    public function test_build_phpunit_command_propagates_worker_role(): void
+    {
+        putenv('PARALLEL_TEST_RUNNER_ROLE=worker');
+
+        try {
+            $command = $this->service->buildPhpunitCommand(
+                base_path('tests/Unit/FooTest.php'),
+                '/tmp/logs',
+                'tests/Unit/FooTest.php',
+            );
+
+            $this->assertContains('PARALLEL_TEST_RUNNER_ROLE=worker', $command->all());
+        } finally {
+            putenv('PARALLEL_TEST_RUNNER_ROLE');
+        }
+    }
+
     public function test_build_phpunit_command_with_files(): void
     {
         $files = [

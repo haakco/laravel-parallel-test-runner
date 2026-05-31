@@ -320,10 +320,16 @@ class TestRunnerConfigurationService
             'env',
             'PARALLEL_TEST_RUNNER_LOG_DIR=' . $logDirectory,
             'TEST_LOG_DIR=' . $logDirectory,
-            'php',
-            '-d',
-            'memory_limit=' . $memoryLimit,
         ];
+
+        $runnerRole = getenv('PARALLEL_TEST_RUNNER_ROLE');
+        if (is_string($runnerRole) && $runnerRole !== '') {
+            $parts[] = 'PARALLEL_TEST_RUNNER_ROLE=' . $runnerRole;
+        }
+
+        $parts[] = 'php';
+        $parts[] = '-d';
+        $parts[] = 'memory_limit=' . $memoryLimit;
 
         foreach ($this->getRuntimeIniOverrides() as $directive) {
             $parts[] = '-d';

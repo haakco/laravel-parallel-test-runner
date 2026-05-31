@@ -77,7 +77,11 @@ final class TestRunSectionsCommand extends Command
             return Command::FAILURE;
         }
 
-        $this->testRunner->publishTopLevelRunDirectory();
+        if ($this->isWorkerProcess()) {
+            $this->testRunner->markAsWorker();
+        } else {
+            $this->testRunner->publishTopLevelRunDirectory();
+        }
         $this->testRunner->configure($optionsData, $this->output);
 
         if ($this->option('find-hanging')) {
@@ -89,6 +93,11 @@ final class TestRunSectionsCommand extends Command
         }
 
         return $this->handleTestRun($optionsData);
+    }
+
+    private function isWorkerProcess(): bool
+    {
+        return getenv('PARALLEL_TEST_RUNNER_ROLE') === 'worker';
     }
 
     private function resolveSplitTotal(): false|int|null

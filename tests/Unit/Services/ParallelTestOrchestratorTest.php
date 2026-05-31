@@ -178,6 +178,7 @@ final class ParallelTestOrchestratorTest extends TestCase
         $buildWorkerEnvironment = new ReflectionMethod($orchestrator, 'buildWorkerEnvironment');
         $environment = $buildWorkerEnvironment->invoke($orchestrator, $plan, new SymfonyProcessWorkerExecutor());
 
+        $this->assertSame('worker', $environment['PARALLEL_TEST_RUNNER_ROLE'] ?? null);
         $this->assertSame($workerLogDir, $environment['PARALLEL_TEST_RUNNER_LOG_DIR'] ?? null);
         $this->assertSame($workerLogDir, $environment['TEST_LOG_DIR'] ?? null);
         $this->assertSame('["tests\/Unit\/FooTest"]', $environment['WORKER_SECTIONS'] ?? null);

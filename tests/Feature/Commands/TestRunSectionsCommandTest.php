@@ -36,12 +36,17 @@ final class TestRunSectionsCommandTest extends TestCase
             ->shouldReceive('publishTopLevelRunDirectory')
             ->byDefault()
             ->andReturn($this->testRunner);
+        $this->testRunner
+            ->shouldReceive('markAsWorker')
+            ->byDefault()
+            ->andReturn($this->testRunner);
         $this->app->instance(TestRunnerService::class, $this->testRunner);
     }
 
     protected function tearDown(): void
     {
         $this->app->setBasePath($this->originalBasePath);
+        putenv('PARALLEL_TEST_RUNNER_ROLE');
 
         parent::tearDown();
     }
@@ -50,6 +55,39 @@ final class TestRunSectionsCommandTest extends TestCase
     {
         $this->artisan('list')
             ->expectsOutputToContain('test:run-sections');
+    }
+
+    public function test_worker_role_does_not_publish_top_level_run_directory(): void
+    {
+        putenv('PARALLEL_TEST_RUNNER_ROLE=worker');
+
+        $this->testRunner
+            ->shouldReceive('publishTopLevelRunDirectory')
+            ->never();
+        $this->testRunner
+            ->shouldReceive('markAsWorker')
+            ->once()
+            ->andReturn($this->testRunner);
+        $this->testRunner
+            ->shouldReceive('configure')
+            ->once()
+            ->andReturn(new TestRunnerConfigurationFeedbackData(
+                message: 'Configuration applied',
+                settings: [],
+            ));
+        $this->testRunner
+            ->shouldReceive('listSectionsWithGroups')
+            ->with(null, null)
+            ->once()
+            ->andReturn(new SectionListResultData(
+                sections: [],
+                totalFiles: 0,
+                totalSections: 0,
+            ));
+
+        $this->artisan('test:run-sections', ['--list' => true])
+            ->expectsOutputToContain('No test sections found')
+            ->assertSuccessful();
     }
 
     public function test_split_total_must_be_at_least_two(): void

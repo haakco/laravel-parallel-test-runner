@@ -160,6 +160,7 @@ final class ParallelTestOrchestrator
                 'worker_id' => $plan->workerId,
                 'command' => $command,
                 'environment' => [
+                    'PARALLEL_TEST_RUNNER_ROLE' => $environment['PARALLEL_TEST_RUNNER_ROLE'] ?? null,
                     'PARALLEL_TEST_RUNNER_LOG_DIR' => $environment['PARALLEL_TEST_RUNNER_LOG_DIR'] ?? null,
                     'TEST_LOG_DIR' => $environment['TEST_LOG_DIR'] ?? null,
                 ],
