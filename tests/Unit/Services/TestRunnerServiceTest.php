@@ -31,6 +31,17 @@ namespace Haakco\ParallelTestRunner\Services {
 
         return \unlink($filename);
     }
+
+    function function_exists(string $function): bool
+    {
+        $override = &$GLOBALS['ptr_test_runner_service_overrides'];
+
+        if (is_array($override) && ($override['enabled'] ?? false) && $function === 'posix_kill') {
+            return (bool) ($override['posix_kill_exists'] ?? true);
+        }
+
+        return \function_exists($function);
+    }
 }
 
 namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
@@ -287,6 +298,28 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertSame($activeRunDir, $service->getLogDirectory());
             $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
             $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
+        }
+
+        public function test_active_run_directory_can_be_reused_without_posix_extension(): void
+        {
+            $activeRunDir = base_path('test-logs/20260531_120000_000000_456abc');
+            if (! is_dir($activeRunDir)) {
+                mkdir($activeRunDir, 0755, true);
+            }
+
+            file_put_contents(base_path('test-logs/.active-run'), json_encode([
+                'pid' => getmypid(),
+                'logDirectory' => $activeRunDir,
+            ], JSON_THROW_ON_ERROR));
+
+            $GLOBALS['ptr_test_runner_service_overrides'] = [
+                'enabled' => true,
+                'posix_kill_exists' => false,
+            ];
+
+            $service = $this->createService();
+
+            $this->assertSame($activeRunDir, $service->getLogDirectory());
         }
 
         public function test_set_log_directory_is_forwarded_to_child_process_environment(): void

@@ -313,7 +313,7 @@ class TestRunnerService
             return @posix_kill($pid, 0);
         }
 
-        return false;
+        return is_dir('/proc/' . $pid);
     }
 
     private function createAuxiliaryLogDirectory(): string
