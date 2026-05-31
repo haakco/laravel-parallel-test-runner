@@ -36,5 +36,7 @@ final class ConfigTest extends TestCase
         $this->assertSame('test:run-sections', config('parallel-test-runner.commands.main'));
         $this->assertSame('test:run-worker', config('parallel-test-runner.commands.worker'));
         $this->assertSame(1, config('parallel-test-runner.parallel.default_processes'));
+        $this->assertSame(50, config('parallel-test-runner.retention.max_runs'));
+        $this->assertSame(14, config('parallel-test-runner.retention.max_age_days'));
     }
 }

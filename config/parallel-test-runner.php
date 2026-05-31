@@ -145,8 +145,8 @@ return [
     | the `latest` symlink and any other entries are never deleted.
     */
     'retention' => [
-        'max_runs' => 20,
-        'max_age_days' => 7,
+        'max_runs' => 50,
+        'max_age_days' => 14,
         // Run the pruner automatically before each new run-dir is created.
         // Disable if you prefer to run `php artisan test:logs-prune` manually.
         'auto_prune' => true,

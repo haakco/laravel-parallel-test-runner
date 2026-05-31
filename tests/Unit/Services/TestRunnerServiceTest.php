@@ -79,7 +79,8 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
         public function test_latest_symlink_uses_relative_target(): void
         {
-            $this->createService();
+            $service = $this->createService();
+            $service->getLogDirectory();
 
             $latest = base_path('test-logs/latest');
             if (! is_link($latest)) {
@@ -114,6 +115,10 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
         public function test_set_log_directory(): void
         {
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
             $service = $this->createService();
             $newDir = sys_get_temp_dir() . '/ptr-test-logdir-' . uniqid();
 
@@ -121,6 +126,8 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
             $this->assertSame($service, $result);
             $this->assertSame($newDir, $service->getLogDirectory());
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
 
             if (is_dir($newDir)) {
                 rmdir($newDir);
@@ -308,6 +315,24 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 logDirectory: $logDirectory,
                 emitMetrics: true,
             );
+        }
+
+        /**
+         * @return list<string>
+         */
+        private function topLevelRunDirectories(): array
+        {
+            $directories = glob(base_path('test-logs/*'), GLOB_ONLYDIR) ?: [];
+            $runs = array_values(array_filter(
+                $directories,
+                static fn(string $path): bool => preg_match(
+                    '/^\d{8}_\d{6}_\d{6}_[0-9a-f]{6}$/',
+                    basename($path),
+                ) === 1,
+            ));
+            sort($runs);
+
+            return $runs;
         }
     }
 }

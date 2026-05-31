@@ -450,9 +450,16 @@ final class ParallelTestOrchestrator
     {
         $this->workerProcesses[$workerId]->outputBuffer .= $outputText;
 
-        if (preg_match('/\[(\d+)\/(\d+)\]/', $outputText, $matches)) {
-            $this->workerProcesses[$workerId]->completedSections = (int) $matches[1];
-            $this->workerProcesses[$workerId]->totalSections = (int) $matches[2];
+        if (preg_match_all('/\[(\d+)\/(\d+)\]/', $outputText, $matches, PREG_SET_ORDER) > 0) {
+            $latestMatch = end($matches);
+            $this->workerProcesses[$workerId]->completedSections = max(
+                $this->workerProcesses[$workerId]->completedSections,
+                (int) $latestMatch[1],
+            );
+            $this->workerProcesses[$workerId]->totalSections = max(
+                $this->workerProcesses[$workerId]->totalSections,
+                (int) $latestMatch[2],
+            );
         }
 
         if ($this->debug) {

@@ -244,6 +244,43 @@ final class ParallelTestOrchestratorTest extends TestCase
         );
     }
 
+    public function test_worker_progress_output_uses_latest_marker_without_moving_backwards(): void
+    {
+        $orchestrator = $this->createOrchestrator();
+        $plan = new WorkerPlanData(
+            workerId: 1,
+            sections: [
+                SectionAssignmentData::fromName('tests/Unit/FooTest'),
+                SectionAssignmentData::fromName('tests/Unit/BarTest'),
+                SectionAssignmentData::fromName('tests/Unit/BazTest'),
+            ],
+            database: 'test_db_w1',
+            logDirectory: sys_get_temp_dir() . '/ptr-worker-' . uniqid(),
+            suite: 'standard',
+            estimatedWeight: 10.0,
+            individual: false,
+        );
+
+        $process = new Process(['php', '-r', '']);
+        $process->start();
+        $process->wait();
+
+        $class = new ReflectionClass($orchestrator);
+        $workerProcesses = $class->getProperty('workerProcesses');
+        $workerProcesses->setValue($orchestrator, [
+            1 => WorkerProcessStateData::running(new InvokedProcess($process), $plan),
+        ]);
+
+        $processWorkerOutput = new ReflectionMethod($orchestrator, 'processWorkerOutput');
+        $processWorkerOutput->invoke($orchestrator, 1, "[1/3] Testing Foo\n[2/3] Testing Bar\n");
+        $processWorkerOutput->invoke($orchestrator, 1, "[0/3] Starting worker\n[3/3] Testing Baz\n");
+        $processWorkerOutput->invoke($orchestrator, 1, "[1/3] Replayed buffered output\n");
+
+        $workers = $workerProcesses->getValue($orchestrator);
+        $this->assertSame(3, $workers[1]->completedSections);
+        $this->assertSame(3, $workers[1]->totalSections);
+    }
+
     private function createOrchestrator(): ParallelTestOrchestrator
     {
         $output = new OutputStyle(new ArrayInput([]), new NullOutput());

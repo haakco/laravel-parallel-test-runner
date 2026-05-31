@@ -20,16 +20,14 @@ use Illuminate\Support\Facades\File;
 
 class TestRunnerService
 {
-    private string $logDirectory;
+    private ?string $logDirectory = null;
 
     public function __construct(
         private readonly TestRunnerConfigurationService $configService,
         private readonly TestExecutionOrchestratorService $executionService,
         private readonly TestDatabaseManagerService $databaseService,
         private readonly HangingTestDetectorService $hangingTestService,
-    ) {
-        $this->logDirectory = $this->createLogDirectory();
-    }
+    ) {}
 
     public function configure(TestRunOptionsData $options, OutputStyle $output): TestRunnerConfigurationFeedbackData
     {
@@ -43,13 +41,13 @@ class TestRunnerService
 
     public function runConfigured(): TestRunResultData
     {
-        return $this->executionService->runConfigured($this->logDirectory);
+        return $this->executionService->runConfigured($this->getLogDirectory());
     }
 
     /** @param array<string, mixed> $options */
     public function run(array $options = []): bool
     {
-        return $this->executionService->run($options, $this->logDirectory);
+        return $this->executionService->run($options, $this->getLogDirectory());
     }
 
     /** @return Collection<int, TestSectionData> */
@@ -112,7 +110,7 @@ class TestRunnerService
 
     public function getLogDirectory(): string
     {
-        return $this->logDirectory;
+        return $this->logDirectory ??= $this->createLogDirectory();
     }
 
     public function setLogDirectory(string $logDirectory): self
