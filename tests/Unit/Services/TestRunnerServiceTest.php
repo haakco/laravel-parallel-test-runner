@@ -354,6 +354,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 'pid' => 99999999,
                 'logDirectory' => $staleRunDir,
             ], JSON_THROW_ON_ERROR));
+            touch(base_path('test-logs/.active-run'), time() - 600);
 
             $service = $this->createService();
             $logDir = $service->getLogDirectory();
@@ -361,6 +362,30 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertNotSame($staleRunDir, $logDir);
             $this->assertStringContainsString('/test-logs/', $logDir);
             $this->assertSame(basename($logDir), is_link(base_path('test-logs/latest')) ? readlink(base_path('test-logs/latest')) : null);
+        }
+
+        public function test_top_level_runner_reuses_fresh_active_run_directory_even_when_pid_is_not_visible(): void
+        {
+            $activeRunDir = base_path('test-logs/20260531_120000_000000_feed01');
+            if (! is_dir($activeRunDir)) {
+                mkdir($activeRunDir, 0755, true);
+            }
+
+            file_put_contents(base_path('test-logs/.active-run'), json_encode([
+                'pid' => 99999999,
+                'logDirectory' => $activeRunDir,
+            ], JSON_THROW_ON_ERROR));
+
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = $this->createService();
+            $logDir = $service->getLogDirectory();
+
+            $this->assertSame($activeRunDir, $logDir);
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
         }
 
         public function test_missing_active_run_directory_removes_stale_marker(): void

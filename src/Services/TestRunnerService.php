@@ -227,13 +227,27 @@ class TestRunnerService
             return null;
         }
 
-        if ($requireLiveProcess && ! $this->activeRunProcessIsVisible($payload)) {
+        if (
+            $requireLiveProcess
+            && ! $this->activeRunProcessIsVisible($payload)
+            && ! $this->activeRunMarkerIsFresh($activeRunFile)
+        ) {
             @unlink($activeRunFile);
 
             return null;
         }
 
         return $logDirectory;
+    }
+
+    private function activeRunMarkerIsFresh(string $activeRunFile): bool
+    {
+        $modifiedAt = @filemtime($activeRunFile);
+        if ($modifiedAt === false) {
+            return false;
+        }
+
+        return time() - $modifiedAt < 300;
     }
 
     /** @param array<string, mixed> $payload */
