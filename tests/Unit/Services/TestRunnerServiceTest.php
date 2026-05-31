@@ -245,7 +245,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
         }
 
-        public function test_runner_context_creates_own_run_directory_when_another_run_is_active(): void
+        public function test_runner_context_reuses_existing_active_run_directory(): void
         {
             $activeRunDir = base_path('test-logs/20260531_120000_000000_fedcba');
             if (! is_dir($activeRunDir)) {
@@ -260,8 +260,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $service = $this->createService();
             $logDir = $service->getLogDirectory();
 
-            $this->assertNotSame($activeRunDir, $logDir);
-            $this->assertStringContainsString('test-logs', $logDir);
+            $this->assertSame($activeRunDir, $logDir);
 
             $activePayload = json_decode((string) file_get_contents(base_path('test-logs/.active-run')), true, flags: JSON_THROW_ON_ERROR);
             $this->assertSame($logDir, $activePayload['logDirectory']);
