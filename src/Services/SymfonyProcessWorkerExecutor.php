@@ -78,6 +78,7 @@ final class SymfonyProcessWorkerExecutor implements WorkerExecutorInterface
             '--worker-plan-file=' . $workerPlanFile,
             '--log-dir=' . $plan->logDirectory,
             '--skip-env-checks',
+            '--worker',
         ];
 
         if ($this->debug) {
@@ -106,6 +107,7 @@ final class SymfonyProcessWorkerExecutor implements WorkerExecutorInterface
     {
         $env = $plan->environment();
         $env['WORKER_SECTIONS'] = json_encode($plan->sectionNames(), JSON_THROW_ON_ERROR);
+        $env['PARALLEL_TEST_RUNNER_ROLE'] = 'worker';
         $env['PARALLEL_TEST_RUNNER_LOG_DIR'] = $plan->logDirectory;
         $env['TEST_LOG_DIR'] = $plan->logDirectory;
 

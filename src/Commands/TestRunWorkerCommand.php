@@ -18,7 +18,8 @@ final class TestRunWorkerCommand extends Command
                             {--fail-fast : Stop on first failure}
                             {--log-dir= : Log directory for this worker}
                             {--skip-env-checks : Skip environment validation}
-                            {--individual : Run each test file individually}';
+                            {--individual : Run each test file individually}
+                            {--worker : Explicitly mark this command as a worker/sub-runner}';
 
     public function __construct(
         private readonly TestRunnerService $testRunner,
@@ -49,6 +50,7 @@ final class TestRunWorkerCommand extends Command
         config(["database.connections.{$dbConnection}.database" => $workerPlan->database]);
         config(['database.default' => $dbConnection]);
 
+        $this->testRunner->markAsWorker();
         $configService = $this->testRunner->getConfigService();
 
         if ($this->option('log-dir')) {

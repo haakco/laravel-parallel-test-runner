@@ -73,6 +73,7 @@ final class TestRunSectionsCommand extends Command
             return Command::FAILURE;
         }
 
+        $this->testRunner->publishTopLevelRunDirectory();
         $this->testRunner->configure($optionsData, $this->output);
 
         if ($this->option('find-hanging')) {

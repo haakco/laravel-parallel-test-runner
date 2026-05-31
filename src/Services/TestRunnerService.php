@@ -24,6 +24,8 @@ class TestRunnerService
 
     private ?string $logDirectory = null;
 
+    private bool $publishesTopLevelRunDirectory = false;
+
     public function __construct(
         private readonly TestRunnerConfigurationService $configService,
         private readonly TestExecutionOrchestratorService $executionService,
@@ -139,6 +141,20 @@ class TestRunnerService
         return $this;
     }
 
+    public function publishTopLevelRunDirectory(): self
+    {
+        $this->publishesTopLevelRunDirectory = true;
+
+        return $this;
+    }
+
+    public function markAsWorker(): self
+    {
+        $this->publishesTopLevelRunDirectory = false;
+
+        return $this;
+    }
+
     public function getConfigService(): TestRunnerConfigurationService
     {
         return $this->configService;
@@ -183,9 +199,7 @@ class TestRunnerService
 
     private function shouldPublishTopLevelRunDirectory(): bool
     {
-        $argv = $_SERVER['argv'] ?? [];
-
-        return in_array('test:run-sections', $argv, true) || in_array('test', $argv, true);
+        return $this->publishesTopLevelRunDirectory;
     }
 
     private function activeRunDirectory(bool $requireLiveProcess): ?string

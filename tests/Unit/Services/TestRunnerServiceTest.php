@@ -172,7 +172,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $latest = base_path('test-logs/latest');
             $latestBefore = is_link($latest) ? readlink($latest) : null;
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
 
             $this->assertSame($ambientDir, $service->getLogDirectory());
             $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
@@ -217,7 +217,27 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $latest = base_path('test-logs/latest');
             $latestBefore = is_link($latest) ? readlink($latest) : null;
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
+            $logDir = $service->getLogDirectory();
+
+            $this->assertStringContainsString('/test-logs/auxiliary/', $logDir);
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
+        }
+
+        public function test_service_does_not_publish_top_level_directory_without_explicit_runner_mark(): void
+        {
+            $_SERVER['argv'] = ['artisan', 'test:run-sections'];
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = new TestRunnerService(
+                new TestRunnerConfigurationService(),
+                $this->createStub(TestExecutionOrchestratorService::class),
+                new TestDatabaseManagerService(),
+                new HangingTestDetectorService(),
+            );
             $logDir = $service->getLogDirectory();
 
             $this->assertStringContainsString('/test-logs/auxiliary/', $logDir);
@@ -268,7 +288,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 'logDirectory' => $activeRunDir,
             ], JSON_THROW_ON_ERROR));
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
             $logDir = $service->getLogDirectory();
 
             $this->assertSame($activeRunDir, $logDir);
@@ -293,7 +313,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $latest = base_path('test-logs/latest');
             $latestBefore = is_link($latest) ? readlink($latest) : null;
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
 
             $this->assertSame($activeRunDir, $service->getLogDirectory());
             $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
@@ -330,7 +350,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 'logDirectory' => $missingRunDir,
             ], JSON_THROW_ON_ERROR));
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
 
             $this->assertNotSame($missingRunDir, $service->getLogDirectory());
             $this->assertFileDoesNotExist(base_path('test-logs/.active-run'));
@@ -353,7 +373,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 'posix_kill_exists' => false,
             ];
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
 
             $this->assertSame($activeRunDir, $service->getLogDirectory());
         }
@@ -375,7 +395,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $latest = base_path('test-logs/latest');
             $latestBefore = is_link($latest) ? readlink($latest) : null;
 
-            $service = $this->createService();
+            $service = $this->createService(publishTopLevelRunDirectory: false);
 
             $this->assertSame($activeRunDir, $service->getLogDirectory());
             $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
@@ -453,7 +473,9 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 ->method('runConfigured')
                 ->willReturnCallback(function (string $logDirectory): TestRunResultData {
                     $siblingDirectory = dirname($logDirectory) . '/99991231_235959_000000_abcdef';
-                    mkdir($siblingDirectory, 0755, true);
+                    if (! is_dir($siblingDirectory)) {
+                        mkdir($siblingDirectory, 0755, true);
+                    }
 
                     $latest = dirname($logDirectory) . '/latest';
                     if (is_link($latest) || is_file($latest)) {
@@ -471,6 +493,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
                 new TestDatabaseManagerService(),
                 new HangingTestDetectorService(),
             );
+            $service->publishTopLevelRunDirectory();
 
             $logDirectory = $service->getLogDirectory();
             $result = $service->runConfigured();
@@ -583,17 +606,23 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             }
         }
 
-        private function createService(): TestRunnerService
+        private function createService(bool $publishTopLevelRunDirectory = true): TestRunnerService
         {
             $configService = $this->createStub(TestRunnerConfigurationService::class);
             $executionService = $this->createStub(TestExecutionOrchestratorService::class);
 
-            return new TestRunnerService(
+            $service = new TestRunnerService(
                 $configService,
                 $executionService,
                 new TestDatabaseManagerService(),
                 new HangingTestDetectorService(),
             );
+
+            if ($publishTopLevelRunDirectory) {
+                $service->publishTopLevelRunDirectory();
+            }
+
+            return $service;
         }
 
         private function createTestRunOptions(?string $logDirectory = null): TestRunOptionsData

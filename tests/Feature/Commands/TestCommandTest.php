@@ -21,6 +21,10 @@ final class TestCommandTest extends TestCase
         parent::setUp();
 
         $this->testRunner = Mockery::mock(TestRunnerService::class);
+        $this->testRunner
+            ->shouldReceive('publishTopLevelRunDirectory')
+            ->byDefault()
+            ->andReturn($this->testRunner);
         $this->app->instance(TestRunnerService::class, $this->testRunner);
     }
 

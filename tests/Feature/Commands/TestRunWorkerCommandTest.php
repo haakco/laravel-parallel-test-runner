@@ -43,6 +43,7 @@ final class TestRunWorkerCommandTest extends TestCase
         $this->configService->shouldReceive('setSpecificSections')->andReturnSelf()->byDefault();
 
         $this->testRunner = Mockery::mock(TestRunnerService::class);
+        $this->testRunner->shouldReceive('markAsWorker')->andReturnSelf()->byDefault();
         $this->testRunner->shouldReceive('getConfigService')->andReturn($this->configService)->byDefault();
         $this->testRunner->shouldReceive('setLogDirectory')->andReturnSelf()->byDefault();
 
@@ -86,6 +87,10 @@ final class TestRunWorkerCommandTest extends TestCase
     public function test_reads_worker_plan_from_file(): void
     {
         $planFile = $this->createValidPlanFile();
+
+        $this->testRunner->shouldReceive('markAsWorker')
+            ->once()
+            ->andReturnSelf();
 
         $this->configService->shouldReceive('setSpecificSections')
             ->with(['Unit/Models'])

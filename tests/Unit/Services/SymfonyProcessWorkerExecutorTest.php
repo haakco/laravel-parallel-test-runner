@@ -35,6 +35,7 @@ final class SymfonyProcessWorkerExecutorTest extends TestCase
         $this->assertContains('--worker-plan-file=/tmp/worker01/worker_plan.json', $command);
         $this->assertContains('--log-dir=/tmp/worker01', $command);
         $this->assertContains('--skip-env-checks', $command);
+        $this->assertContains('--worker', $command);
     }
 
     public function test_includes_configured_environment_vars(): void
@@ -61,6 +62,7 @@ final class SymfonyProcessWorkerExecutorTest extends TestCase
         $this->assertArrayHasKey('TEST_WORKER_ID', $env);
         $this->assertSame('1', $env['TEST_WORKER_ID']);
         $this->assertArrayHasKey('WORKER_SECTIONS', $env);
+        $this->assertSame('worker', $env['PARALLEL_TEST_RUNNER_ROLE']);
         $this->assertSame('/tmp/worker01', $env['PARALLEL_TEST_RUNNER_LOG_DIR']);
         $this->assertSame('/tmp/worker01', $env['TEST_LOG_DIR']);
     }
