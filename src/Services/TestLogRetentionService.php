@@ -91,7 +91,11 @@ class TestLogRetentionService
             return [];
         }
 
-        $runDirs = $this->collectRunDirs();
+        $protectedRunDirectories = $this->protectedRunDirectories();
+        $runDirs = array_values(array_filter(
+            $this->collectRunDirs(),
+            static fn(array $entry): bool => ! in_array($entry['path'], $protectedRunDirectories, true),
+        ));
         if ($runDirs === []) {
             return [];
         }
@@ -132,6 +136,37 @@ class TestLogRetentionService
         }
 
         return $entries;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function protectedRunDirectories(): array
+    {
+        $activeRunFile = $this->baseDirectory . '/.active-run';
+        if (! is_file($activeRunFile)) {
+            return [];
+        }
+
+        $payload = json_decode((string) @file_get_contents($activeRunFile), true);
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $logDirectory = $payload['logDirectory'] ?? null;
+        if (! is_string($logDirectory) || $logDirectory === '') {
+            return [];
+        }
+
+        if (dirname($logDirectory) !== $this->baseDirectory) {
+            return [];
+        }
+
+        if (preg_match(self::RUN_DIR_REGEX, basename($logDirectory)) !== 1) {
+            return [];
+        }
+
+        return [$logDirectory];
     }
 
     /**

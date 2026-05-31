@@ -66,6 +66,26 @@ final class TestLogRetentionServiceTest extends TestCase
         $this->assertDirectoryDoesNotExist($middle);
     }
 
+    public function test_preserves_active_run_directory_when_pruning_by_max_runs(): void
+    {
+        $activeRun = $this->createRunDir(daysAgo: 5);
+        $middle = $this->createRunDir(daysAgo: 3);
+        $newest = $this->createRunDir(daysAgo: 1);
+        file_put_contents($this->baseDir . '/.active-run', json_encode([
+            'pid' => getmypid(),
+            'logDirectory' => $activeRun,
+        ], JSON_THROW_ON_ERROR));
+
+        $service = new TestLogRetentionService($this->baseDir, maxRuns: 1, maxAgeDays: null);
+
+        $deleted = $service->prune();
+
+        $this->assertSame([$middle], $deleted);
+        $this->assertDirectoryExists($activeRun);
+        $this->assertDirectoryDoesNotExist($middle);
+        $this->assertDirectoryExists($newest);
+    }
+
     public function test_prunes_by_max_age_days_only(): void
     {
         $aged = $this->createRunDir(daysAgo: 30);
