@@ -26,9 +26,12 @@ final class SymfonyProcessWorkerExecutorTest extends TestCase
 
         $command = $executor->buildCommand($plan);
 
-        $this->assertSame('php', $command[0]);
-        $this->assertSame('artisan', $command[1]);
-        $this->assertSame('test:run-worker', $command[2]);
+        $this->assertSame('env', $command[0]);
+        $this->assertSame('PARALLEL_TEST_RUNNER_LOG_DIR=/tmp/worker01', $command[1]);
+        $this->assertSame('TEST_LOG_DIR=/tmp/worker01', $command[2]);
+        $this->assertSame('php', $command[3]);
+        $this->assertSame('artisan', $command[4]);
+        $this->assertSame('test:run-worker', $command[5]);
         $this->assertContains('--worker-plan-file=/tmp/worker01/worker_plan.json', $command);
         $this->assertContains('--log-dir=/tmp/worker01', $command);
         $this->assertContains('--skip-env-checks', $command);

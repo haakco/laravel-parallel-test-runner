@@ -315,6 +315,9 @@ class TestRunnerConfigurationService
         $memoryLimit = config('parallel-test-runner.phpunit.memory_limit', '512M');
 
         $parts = [
+            'env',
+            'PARALLEL_TEST_RUNNER_LOG_DIR=' . $logDirectory,
+            'TEST_LOG_DIR=' . $logDirectory,
             'php',
             '-d',
             'memory_limit=' . $memoryLimit,

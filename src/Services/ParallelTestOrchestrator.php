@@ -159,6 +159,10 @@ final class ParallelTestOrchestrator
             $commandLog[] = [
                 'worker_id' => $plan->workerId,
                 'command' => $command,
+                'environment' => [
+                    'PARALLEL_TEST_RUNNER_LOG_DIR' => $environment['PARALLEL_TEST_RUNNER_LOG_DIR'] ?? null,
+                    'TEST_LOG_DIR' => $environment['TEST_LOG_DIR'] ?? null,
+                ],
                 'log_directory' => $plan->logDirectory,
                 'database' => $plan->database,
             ];

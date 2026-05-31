@@ -69,6 +69,9 @@ final class SymfonyProcessWorkerExecutor implements WorkerExecutorInterface
         $workerPlanFile = $plan->logDirectory . '/worker_plan.json';
 
         $command = [
+            'env',
+            'PARALLEL_TEST_RUNNER_LOG_DIR=' . $plan->logDirectory,
+            'TEST_LOG_DIR=' . $plan->logDirectory,
             'php',
             'artisan',
             (string) config('parallel-test-runner.commands.worker', 'test:run-worker'),

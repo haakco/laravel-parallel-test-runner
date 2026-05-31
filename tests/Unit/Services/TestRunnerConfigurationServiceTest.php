@@ -210,7 +210,9 @@ final class TestRunnerConfigurationServiceTest extends TestCase
 
         $parts = $command->all();
 
-        $this->assertSame('php', $parts[0]);
+        $this->assertSame('env', $parts[0]);
+        $this->assertContains('PARALLEL_TEST_RUNNER_LOG_DIR=/tmp/logs', $parts);
+        $this->assertContains('TEST_LOG_DIR=/tmp/logs', $parts);
         $this->assertContains('--no-coverage', $parts);
         $this->assertContains('--colors=never', $parts);
         $this->assertContains(base_path('tests/Unit/FooTest.php'), $parts);
