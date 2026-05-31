@@ -296,6 +296,22 @@ final class TestRunSectionsCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_test_file_alias_rejects_directories(): void
+    {
+        $directory = base_path('tests/Unit');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $this->testRunner
+            ->shouldNotReceive('configure');
+
+        $this->artisan('test:run-sections', ['--test-file' => ['tests/Unit']])
+            ->expectsOutputToContain('--test-file received a directory: tests/Unit')
+            ->expectsOutputToContain('Use --section=Unit to run that directory.')
+            ->assertExitCode(1);
+    }
+
     public function test_failed_test_run(): void
     {
         $this->testRunner

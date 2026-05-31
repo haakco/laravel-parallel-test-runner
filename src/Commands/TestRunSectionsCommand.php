@@ -58,6 +58,10 @@ final class TestRunSectionsCommand extends Command
 
         $optionsData = $this->buildOptionsData($splitTotal, $splitGroup);
 
+        if ($this->rejectDirectoryTestFileOptions() === Command::FAILURE) {
+            return Command::FAILURE;
+        }
+
         if ($this->option('status')) {
             return $this->handleBackgroundStatus();
         }
@@ -332,6 +336,70 @@ final class TestRunSectionsCommand extends Command
         }
 
         return $result->exitCode;
+    }
+
+    private function rejectDirectoryTestFileOptions(): int
+    {
+        $testFiles = $this->option('test-file');
+        if (! is_array($testFiles)) {
+            return Command::SUCCESS;
+        }
+
+        foreach ($testFiles as $testFile) {
+            $path = (string) $testFile;
+            if ($path === '') {
+                continue;
+            }
+
+            if (! is_dir($this->resolvePath($path))) {
+                continue;
+            }
+
+            $this->error(sprintf('--test-file received a directory: %s', $path));
+            $this->line(sprintf('Use --section=%s to run that directory.', $this->sectionNameFromDirectory($path)));
+
+            return Command::FAILURE;
+        }
+
+        return Command::SUCCESS;
+    }
+
+    private function resolvePath(string $path): string
+    {
+        if ($this->isAbsolutePath($path)) {
+            return $path;
+        }
+
+        return base_path($path);
+    }
+
+    private function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/')
+            || str_starts_with($path, '\\\\')
+            || preg_match('/^[A-Za-z]:[\\\\\\/]/', $path) === 1;
+    }
+
+    private function sectionNameFromDirectory(string $path): string
+    {
+        $normalized = $this->normalizePathForDisplay($path);
+        $testsPrefix = 'tests/';
+
+        if (str_starts_with($normalized, $testsPrefix)) {
+            return substr($normalized, strlen($testsPrefix));
+        }
+
+        $baseTestsPrefix = rtrim($this->normalizePathForDisplay(base_path('tests')), '/') . '/';
+        $resolvedPath = realpath($this->resolvePath($path));
+
+        if ($resolvedPath !== false) {
+            $normalizedResolvedPath = $this->normalizePathForDisplay($resolvedPath);
+            if (str_starts_with($normalizedResolvedPath, $baseTestsPrefix)) {
+                return substr($normalizedResolvedPath, strlen($baseTestsPrefix));
+            }
+        }
+
+        return $normalized;
     }
 
     private function displayRelativePath(string $path): string
