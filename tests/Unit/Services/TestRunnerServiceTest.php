@@ -253,7 +253,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             }
 
             file_put_contents(base_path('test-logs/.active-run'), json_encode([
-                'pid' => getmypid(),
+                'pid' => \posix_getppid(),
                 'logDirectory' => $activeRunDir,
             ], JSON_THROW_ON_ERROR));
 
@@ -265,6 +265,29 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
             $activePayload = json_decode((string) file_get_contents(base_path('test-logs/.active-run')), true, flags: JSON_THROW_ON_ERROR);
             $this->assertSame($logDir, $activePayload['logDirectory']);
+        }
+
+        public function test_nested_runner_context_reuses_current_process_active_run_directory(): void
+        {
+            $activeRunDir = base_path('test-logs/20260531_120000_000000_123abc');
+            if (! is_dir($activeRunDir)) {
+                mkdir($activeRunDir, 0755, true);
+            }
+
+            file_put_contents(base_path('test-logs/.active-run'), json_encode([
+                'pid' => getmypid(),
+                'logDirectory' => $activeRunDir,
+            ], JSON_THROW_ON_ERROR));
+
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = $this->createService();
+
+            $this->assertSame($activeRunDir, $service->getLogDirectory());
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
         }
 
         public function test_set_log_directory_is_forwarded_to_child_process_environment(): void

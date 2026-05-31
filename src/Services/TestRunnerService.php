@@ -139,15 +139,17 @@ class TestRunnerService
 
     private function createLogDirectory(): string
     {
-        if (! $this->shouldPublishTopLevelRunDirectory()) {
-            $activeRunDirectory = $this->activeRunDirectory();
-            if ($activeRunDirectory !== null) {
-                self::$processLogDirectory = $activeRunDirectory;
-                $this->configService->setLogDirectoryEnvironment($activeRunDirectory);
+        $shouldPublishTopLevelRunDirectory = $this->shouldPublishTopLevelRunDirectory();
+        $activeRunDirectory = $this->activeRunDirectory(allowDifferentProcess: ! $shouldPublishTopLevelRunDirectory);
 
-                return $activeRunDirectory;
-            }
+        if ($activeRunDirectory !== null) {
+            self::$processLogDirectory = $activeRunDirectory;
+            $this->configService->setLogDirectoryEnvironment($activeRunDirectory);
 
+            return $activeRunDirectory;
+        }
+
+        if (! $shouldPublishTopLevelRunDirectory) {
             $dir = $this->createAuxiliaryLogDirectory();
             self::$processLogDirectory = $dir;
             $this->configService->setLogDirectoryEnvironment($dir);
@@ -181,7 +183,7 @@ class TestRunnerService
         return in_array('test:run-sections', $argv, true) || in_array('test', $argv, true);
     }
 
-    private function activeRunDirectory(): ?string
+    private function activeRunDirectory(bool $allowDifferentProcess): ?string
     {
         $activeRunFile = $this->activeRunFile();
         if (! is_file($activeRunFile)) {
@@ -197,6 +199,10 @@ class TestRunnerService
         $logDirectory = $payload['logDirectory'] ?? null;
 
         if (! is_int($pid) || ! is_string($logDirectory) || $logDirectory === '' || ! is_dir($logDirectory)) {
+            return null;
+        }
+
+        if (! $allowDifferentProcess && $pid !== getmypid()) {
             return null;
         }
 
