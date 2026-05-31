@@ -157,6 +157,8 @@ class TestRunnerConfigurationService
     {
         $this->runtimeEnvOverrides['PARALLEL_TEST_RUNNER_LOG_DIR'] = $logDirectory;
         $this->runtimeEnvOverrides['TEST_LOG_DIR'] = $logDirectory;
+        putenv('PARALLEL_TEST_RUNNER_LOG_DIR=' . $logDirectory);
+        putenv('TEST_LOG_DIR=' . $logDirectory);
 
         return $this;
     }

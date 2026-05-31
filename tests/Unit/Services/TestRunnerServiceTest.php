@@ -171,6 +171,20 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
             $this->assertSame($latestAfterFirstService, is_link($latest) ? readlink($latest) : null);
         }
 
+        public function test_created_log_directory_is_published_to_process_environment(): void
+        {
+            $service = new TestRunnerService(
+                new TestRunnerConfigurationService(),
+                $this->createStub(TestExecutionOrchestratorService::class),
+                new TestDatabaseManagerService(),
+                new HangingTestDetectorService(),
+            );
+            $logDir = $service->getLogDirectory();
+
+            $this->assertSame($logDir, getenv('PARALLEL_TEST_RUNNER_LOG_DIR'));
+            $this->assertSame($logDir, getenv('TEST_LOG_DIR'));
+        }
+
         public function test_set_log_directory_is_forwarded_to_child_process_environment(): void
         {
             $configService = new TestRunnerConfigurationService();
