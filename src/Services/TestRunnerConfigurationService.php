@@ -153,6 +153,14 @@ class TestRunnerConfigurationService
         return $this;
     }
 
+    public function setLogDirectoryEnvironment(string $logDirectory): self
+    {
+        $this->runtimeEnvOverrides['PARALLEL_TEST_RUNNER_LOG_DIR'] = $logDirectory;
+        $this->runtimeEnvOverrides['TEST_LOG_DIR'] = $logDirectory;
+
+        return $this;
+    }
+
     public function setSplitTotal(?int $splitTotal): self
     {
         $this->splitTotal = $splitTotal;
@@ -201,7 +209,7 @@ class TestRunnerConfigurationService
         /** @var array<string, string> $staticEnv */
         $staticEnv = config('parallel-test-runner.environment', []);
 
-        $env = array_merge($staticEnv, $this->runtimeEnvOverrides);
+        $env = array_merge($staticEnv, $this->ambientRunnerEnvironment(), $this->runtimeEnvOverrides);
 
         if (! array_key_exists('APP_ENV', $env)) {
             $env['APP_ENV'] = 'testing';
@@ -417,5 +425,20 @@ class TestRunnerConfigurationService
         $timeout = trim((string) shell_exec('which timeout 2>/dev/null'));
 
         return $timeout !== '' ? $timeout : null;
+    }
+
+    /** @return array<string, string> */
+    private function ambientRunnerEnvironment(): array
+    {
+        $env = [];
+
+        foreach (['PARALLEL_TEST_RUNNER_LOG_DIR', 'TEST_LOG_DIR'] as $key) {
+            $value = getenv($key);
+            if (is_string($value) && $value !== '') {
+                $env[$key] = $value;
+            }
+        }
+
+        return $env;
     }
 }

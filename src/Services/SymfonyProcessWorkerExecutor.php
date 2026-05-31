@@ -103,6 +103,8 @@ final class SymfonyProcessWorkerExecutor implements WorkerExecutorInterface
     {
         $env = $plan->environment();
         $env['WORKER_SECTIONS'] = json_encode($plan->sectionNames(), JSON_THROW_ON_ERROR);
+        $env['PARALLEL_TEST_RUNNER_LOG_DIR'] = $plan->logDirectory;
+        $env['TEST_LOG_DIR'] = $plan->logDirectory;
 
         return $env;
     }

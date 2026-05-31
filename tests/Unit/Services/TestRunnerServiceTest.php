@@ -56,6 +56,8 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
         protected function tearDown(): void
         {
             unset($GLOBALS['ptr_test_runner_service_overrides']);
+            putenv('PARALLEL_TEST_RUNNER_LOG_DIR');
+            putenv('TEST_LOG_DIR');
 
             parent::tearDown();
         }
@@ -131,6 +133,47 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
             if (is_dir($newDir)) {
                 rmdir($newDir);
+            }
+        }
+
+        public function test_uses_ambient_runner_log_directory_without_creating_root_run(): void
+        {
+            $ambientDir = sys_get_temp_dir() . '/ptr-ambient-logdir-' . uniqid();
+            mkdir($ambientDir, 0755, true);
+            putenv('PARALLEL_TEST_RUNNER_LOG_DIR=' . $ambientDir);
+
+            $topLevelRunsBefore = $this->topLevelRunDirectories();
+            $latest = base_path('test-logs/latest');
+            $latestBefore = is_link($latest) ? readlink($latest) : null;
+
+            $service = $this->createService();
+
+            $this->assertSame($ambientDir, $service->getLogDirectory());
+            $this->assertSame($topLevelRunsBefore, $this->topLevelRunDirectories());
+            $this->assertSame($latestBefore, is_link($latest) ? readlink($latest) : null);
+
+            rmdir($ambientDir);
+        }
+
+        public function test_set_log_directory_is_forwarded_to_child_process_environment(): void
+        {
+            $configService = new TestRunnerConfigurationService();
+            $service = new TestRunnerService(
+                $configService,
+                $this->createStub(TestExecutionOrchestratorService::class),
+                new TestDatabaseManagerService(),
+                new HangingTestDetectorService(),
+            );
+            $newLogDir = sys_get_temp_dir() . '/ptr-child-env-logdir-' . uniqid();
+
+            $service->setLogDirectory($newLogDir);
+
+            $environment = $configService->getProcessEnvironment();
+            $this->assertSame($newLogDir, $environment->get('PARALLEL_TEST_RUNNER_LOG_DIR'));
+            $this->assertSame($newLogDir, $environment->get('TEST_LOG_DIR'));
+
+            if (is_dir($newLogDir)) {
+                rmdir($newLogDir);
             }
         }
 

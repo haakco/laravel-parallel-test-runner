@@ -48,6 +48,8 @@ final class SymfonyProcessWorkerExecutorTest extends TestCase
 
     public function test_includes_worker_specific_env_vars(): void
     {
+        config()->set('parallel-test-runner.worker_environment.set_test_log_dir', false);
+
         $executor = new SymfonyProcessWorkerExecutor();
         $plan = $this->makePlan();
 
@@ -56,6 +58,8 @@ final class SymfonyProcessWorkerExecutorTest extends TestCase
         $this->assertArrayHasKey('TEST_WORKER_ID', $env);
         $this->assertSame('1', $env['TEST_WORKER_ID']);
         $this->assertArrayHasKey('WORKER_SECTIONS', $env);
+        $this->assertSame('/tmp/worker01', $env['PARALLEL_TEST_RUNNER_LOG_DIR']);
+        $this->assertSame('/tmp/worker01', $env['TEST_LOG_DIR']);
     }
 
     public function test_includes_test_log_dir_by_default(): void

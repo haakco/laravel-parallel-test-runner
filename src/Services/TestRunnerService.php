@@ -27,13 +27,18 @@ class TestRunnerService
         private readonly TestExecutionOrchestratorService $executionService,
         private readonly TestDatabaseManagerService $databaseService,
         private readonly HangingTestDetectorService $hangingTestService,
-    ) {}
+    ) {
+        $this->logDirectory = $this->ambientLogDirectory();
+
+        if ($this->logDirectory !== null) {
+            $this->configService->setLogDirectoryEnvironment($this->logDirectory);
+        }
+    }
 
     public function configure(TestRunOptionsData $options, OutputStyle $output): TestRunnerConfigurationFeedbackData
     {
         if ($options->logDirectory !== null && $options->logDirectory !== $this->logDirectory) {
-            $this->ensureDirectoryExists($options->logDirectory);
-            $this->logDirectory = $options->logDirectory;
+            $this->applyExistingLogDirectory($options->logDirectory);
         }
 
         return $this->configService->configure($options, $output);
@@ -115,8 +120,7 @@ class TestRunnerService
 
     public function setLogDirectory(string $logDirectory): self
     {
-        $this->ensureDirectoryExists($logDirectory);
-        $this->logDirectory = $logDirectory;
+        $this->applyExistingLogDirectory($logDirectory);
 
         return $this;
     }
@@ -142,6 +146,25 @@ class TestRunnerService
         }
 
         return $dir;
+    }
+
+    private function applyExistingLogDirectory(string $logDirectory): void
+    {
+        $this->ensureDirectoryExists($logDirectory);
+        $this->logDirectory = $logDirectory;
+        $this->configService->setLogDirectoryEnvironment($logDirectory);
+    }
+
+    private function ambientLogDirectory(): ?string
+    {
+        foreach (['PARALLEL_TEST_RUNNER_LOG_DIR', 'TEST_LOG_DIR'] as $key) {
+            $value = getenv($key);
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     /**
