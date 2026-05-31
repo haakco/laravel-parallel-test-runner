@@ -434,7 +434,9 @@ final class ParallelTestOrchestrator
                 }
             }
 
-            return max($worker->completedSections, $completed);
+            $worker->completedSections = max($worker->completedSections, $completed);
+
+            return $worker->completedSections;
         } catch (Exception) {
             return $worker->completedSections;
         }

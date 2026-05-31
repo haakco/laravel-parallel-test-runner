@@ -359,6 +359,71 @@ final class ParallelTestOrchestratorTest extends TestCase
         );
     }
 
+    public function test_tracking_file_completed_count_persists_high_water_mark(): void
+    {
+        $orchestrator = $this->createOrchestrator();
+        $workerLogDir = sys_get_temp_dir() . '/ptr-worker-progress-' . uniqid();
+        mkdir($workerLogDir, 0755, true);
+
+        $plan = new WorkerPlanData(
+            workerId: 1,
+            sections: [
+                SectionAssignmentData::fromName('tests/Unit/FooTest'),
+                SectionAssignmentData::fromName('tests/Unit/BarTest'),
+                SectionAssignmentData::fromName('tests/Unit/BazTest'),
+            ],
+            database: 'test_db_w1',
+            logDirectory: $workerLogDir,
+            suite: 'standard',
+            estimatedWeight: 10.0,
+            individual: false,
+        );
+
+        $process = new SymfonyProcess(['php', '-r', '']);
+        $process->start();
+        $process->wait();
+
+        $class = new ReflectionClass($orchestrator);
+        $workerProcesses = $class->getProperty('workerProcesses');
+        $workerProcesses->setValue($orchestrator, [
+            1 => WorkerProcessStateData::running(new InvokedProcess($process), $plan),
+        ]);
+
+        $countCompletedSectionsFromTracking = new ReflectionMethod($orchestrator, 'countCompletedSectionsFromTracking');
+
+        file_put_contents(
+            $workerLogDir . '/execution_tracking.json',
+            json_encode([
+                'sections' => [
+                    'tests/Unit/FooTest' => ['completed_at' => 100],
+                    'tests/Unit/BarTest' => ['completed_at' => 101],
+                    'tests/Unit/BazTest' => ['completed_at' => 102],
+                ],
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        $this->assertSame(
+            3,
+            $countCompletedSectionsFromTracking->invoke($orchestrator, $workerProcesses->getValue($orchestrator)[1]),
+        );
+
+        file_put_contents(
+            $workerLogDir . '/execution_tracking.json',
+            json_encode([
+                'sections' => [
+                    'tests/Unit/FooTest' => ['completed_at' => null],
+                    'tests/Unit/BarTest' => ['completed_at' => null],
+                    'tests/Unit/BazTest' => ['completed_at' => null],
+                ],
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        $this->assertSame(
+            3,
+            $countCompletedSectionsFromTracking->invoke($orchestrator, $workerProcesses->getValue($orchestrator)[1]),
+        );
+    }
+
     private function createOrchestrator(): ParallelTestOrchestrator
     {
         $output = new OutputStyle(new ArrayInput([]), new NullOutput());
