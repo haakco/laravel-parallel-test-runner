@@ -60,4 +60,19 @@ final class ReportFormatterTest extends TestCase
             $formatter->relativePath(str_replace('/', '\\', base_path('reports/performance.md'))),
         );
     }
+
+    public function test_float_duration_does_not_emit_deprecations(): void
+    {
+        $formatter = new ReportFormatter();
+
+        set_error_handler(static function (int $severity, string $message): never {
+            throw new \RuntimeException(sprintf('formatDuration emitted error %d: %s', $severity, $message));
+        }, E_DEPRECATED);
+
+        try {
+            $this->assertSame('15.02s', $formatter->formatDuration(15.020668029785156));
+        } finally {
+            restore_error_handler();
+        }
+    }
 }

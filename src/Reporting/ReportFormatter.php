@@ -48,7 +48,7 @@ final class ReportFormatter
         }
 
         $hours = (int) floor($seconds / 3600);
-        $minutes = (int) floor(($seconds % 3600) / 60);
+        $minutes = (int) floor(fmod($seconds, 3600) / 60);
         $remaining = fmod($seconds, 60);
 
         if ($hours > 0) {

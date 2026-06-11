@@ -59,6 +59,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
     use Haakco\ParallelTestRunner\Tests\TestCase;
     use Illuminate\Console\OutputStyle;
     use Illuminate\Support\Collection;
+    use Illuminate\Support\Facades\File;
     use Symfony\Component\Console\Input\ArrayInput;
     use Symfony\Component\Console\Output\NullOutput;
 
@@ -73,6 +74,7 @@ namespace Haakco\ParallelTestRunner\Tests\Unit\Services {
 
             $this->originalArgv = $_SERVER['argv'] ?? [];
             $_SERVER['argv'] = ['artisan', 'test:run-sections'];
+            File::ensureDirectoryExists(base_path('test-logs'));
             @unlink(base_path('test-logs/.active-run'));
         }
 
