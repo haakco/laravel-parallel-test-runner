@@ -15,7 +15,13 @@ permissions:
 jobs:
   lint:
     name: Lint (PHP ${{ matrix.php }})
-    runs-on: self-hosted
+    runs-on: haakco-build
+    container:
+      image: ghcr.io/haakco/actions-runner:1
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
     strategy:
       fail-fast: true
       matrix:
@@ -57,7 +63,7 @@ jobs:
 
   check-coupling:
     name: Check coupling
-    runs-on: self-hosted
+    runs-on: [self-hosted, haakco]
     steps:
       - uses: actions/checkout@v6
 
@@ -68,7 +74,13 @@ jobs:
 
   test:
     name: Test (PHP ${{ matrix.php }}, Laravel ${{ matrix.laravel }})
-    runs-on: self-hosted
+    runs-on: haakco-build
+    container:
+      image: ghcr.io/haakco/actions-runner:1
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
     strategy:
       fail-fast: false
       matrix:
